@@ -39,6 +39,62 @@ describe('sqlite migration framework', () => {
         )
         .get(),
     ).toBeTruthy();
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_profiles'",
+        )
+        .get(),
+    ).toBeTruthy();
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workspaces'",
+        )
+        .get(),
+    ).toBeTruthy();
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'channel_accounts'",
+        )
+        .get(),
+    ).toBeTruthy();
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_profile_prompt_versions'",
+        )
+        .get(),
+    ).toBeTruthy();
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runtime_sessions'",
+        )
+        .get(),
+    ).toBeTruthy();
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'channel_mounts'",
+        )
+        .get(),
+    ).toBeTruthy();
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_channel_mounts'",
+        )
+        .get(),
+    ).toBeTruthy();
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'im_context_bindings'",
+        )
+        .get(),
+    ).toBeTruthy();
     db.close();
   });
 

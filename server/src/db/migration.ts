@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * Exported so migration tests can assert "an old database reaches head"
  * without restating the number.
  */
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 export class MigrationError extends Error {}
 
@@ -107,10 +107,148 @@ function createAuthTables(db: Database.Database): void {
   `);
 }
 
+function createDomainTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_profiles (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      identity_prompt TEXT NOT NULL DEFAULT '',
+      soul_prompt TEXT NOT NULL DEFAULT '',
+      agents_prompt TEXT NOT NULL DEFAULT '',
+      tools_prompt TEXT NOT NULL DEFAULT '',
+      prompt_mode TEXT NOT NULL DEFAULT 'append',
+      identity_hash TEXT NOT NULL DEFAULT '',
+      version INTEGER NOT NULL DEFAULT 1,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (owner_user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_profiles_owner
+      ON agent_profiles(owner_user_id, status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_profiles_default
+      ON agent_profiles(owner_user_id)
+      WHERE is_default = 1 AND status = 'active';
+
+    CREATE TABLE IF NOT EXISTS agent_profile_prompt_versions (
+      id TEXT PRIMARY KEY,
+      agent_profile_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      identity_prompt TEXT NOT NULL DEFAULT '',
+      soul_prompt TEXT NOT NULL DEFAULT '',
+      agents_prompt TEXT NOT NULL DEFAULT '',
+      tools_prompt TEXT NOT NULL DEFAULT '',
+      prompt_mode TEXT NOT NULL DEFAULT 'append',
+      identity_hash TEXT NOT NULL DEFAULT '',
+      change_source TEXT NOT NULL DEFAULT 'update',
+      restored_from_version INTEGER,
+      created_at TEXT NOT NULL,
+      UNIQUE(agent_profile_id, version),
+      FOREIGN KEY (agent_profile_id) REFERENCES agent_profiles(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_profile_prompt_versions_profile
+      ON agent_profile_prompt_versions(agent_profile_id, version DESC);
+
+    CREATE TABLE IF NOT EXISTS workspaces (
+      jid TEXT PRIMARY KEY,
+      folder TEXT NOT NULL,
+      owner_user_id TEXT,
+      name TEXT NOT NULL,
+      agent_profile_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      is_home INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (owner_user_id) REFERENCES users(id),
+      FOREIGN KEY (agent_profile_id) REFERENCES agent_profiles(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspaces_folder ON workspaces(folder);
+    CREATE INDEX IF NOT EXISTS idx_workspaces_owner
+      ON workspaces(owner_user_id, status);
+
+    CREATE TABLE IF NOT EXISTS runtime_sessions (
+      id TEXT PRIMARY KEY,
+      workspace_jid TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      agent_profile_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_runtime_sessions_workspace
+      ON runtime_sessions(workspace_jid, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS channel_accounts (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      name TEXT NOT NULL,
+      secret_ref TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      default_workspace_jid TEXT,
+      status TEXT NOT NULL DEFAULT 'disconnected',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(owner_user_id, provider, name),
+      FOREIGN KEY (owner_user_id) REFERENCES users(id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_accounts_one_default
+      ON channel_accounts(owner_user_id, provider)
+      WHERE is_default = 1;
+
+    CREATE TABLE IF NOT EXISTS channel_mounts (
+      im_jid TEXT PRIMARY KEY,
+      channel_type TEXT NOT NULL,
+      workspace_jid TEXT NOT NULL,
+      owner_user_id TEXT NOT NULL,
+      channel_account_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE,
+      FOREIGN KEY (owner_user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_channel_mounts_workspace
+      ON channel_mounts(workspace_jid);
+
+    CREATE TABLE IF NOT EXISTS agent_channel_mounts (
+      im_jid TEXT PRIMARY KEY,
+      channel_type TEXT NOT NULL,
+      workspace_jid TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      owner_user_id TEXT NOT NULL,
+      channel_account_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE,
+      FOREIGN KEY (owner_user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_channel_mounts_session
+      ON agent_channel_mounts(session_id);
+
+    CREATE TABLE IF NOT EXISTS im_context_bindings (
+      source_jid TEXT NOT NULL,
+      context_type TEXT NOT NULL,
+      context_id TEXT NOT NULL,
+      workspace_jid TEXT NOT NULL,
+      session_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (source_jid, context_type, context_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_icb_workspace ON im_context_bindings(workspace_jid);
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
   { version: 3, name: 'auth_tables', up: createAuthTables },
+  { version: 4, name: 'domain_tables', up: createDomainTables },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {
