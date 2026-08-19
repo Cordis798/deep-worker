@@ -529,4 +529,55 @@ describe('P3 domain model and API', () => {
     const list = (await adminList.json()) as { workspaces: unknown[] };
     expect(list.workspaces.length).toBe(0);
   });
+
+  it('rejects invalid write payloads with zod errors', async () => {
+    adminCookie = await setupAdmin(app);
+
+    const workspace = await app.request(
+      '/api/workspaces',
+      jsonRequest('/api/workspaces', { name: '' }, adminCookie),
+    );
+    expect(workspace.status).toBe(400);
+    expect(((await workspace.json()) as { error: string }).error).toContain(
+      '不能为空',
+    );
+
+    const agent = await app.request(
+      '/api/agent-profiles',
+      jsonRequest(
+        '/api/agent-profiles',
+        { name: 'A', prompt_mode: 'bogus' },
+        adminCookie,
+      ),
+    );
+    expect(agent.status).toBe(400);
+    expect(((await agent.json()) as { error: string }).error).toBeTruthy();
+
+    const channel = await app.request(
+      '/api/channel-accounts',
+      jsonRequest(
+        '/api/channel-accounts',
+        { provider: 'slack', name: 'A' },
+        adminCookie,
+      ),
+    );
+    expect(channel.status).toBe(400);
+    expect(((await channel.json()) as { error: string }).error).toBeTruthy();
+
+    const emptyPatch = await app.request(
+      '/api/workspaces/web:missing',
+      jsonRequest('/api/workspaces/web:missing', {}, adminCookie, 'PATCH'),
+    );
+    expect(emptyPatch.status).toBe(400);
+
+    const emptyBind = await app.request(
+      '/api/workspaces/web:missing/im-binding',
+      putJson(
+        '/api/workspaces/web:missing/im-binding',
+        { im_jid: '', channel_type: 'group' },
+        adminCookie,
+      ),
+    );
+    expect(emptyBind.status).toBe(400);
+  });
 });
