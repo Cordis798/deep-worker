@@ -580,4 +580,109 @@ describe('P3 domain model and API', () => {
     );
     expect(emptyBind.status).toBe(400);
   });
+
+  it('covers missing-resource and duplicate failures across domain CRUD', async () => {
+    adminCookie = await setupAdmin(app);
+
+    const missingWs = await app.request(
+      '/api/workspaces/web:missing',
+      cookieRequest(adminCookie),
+    );
+    expect(missingWs.status).toBe(404);
+    const missingWsPatch = await app.request(
+      '/api/workspaces/web:missing',
+      jsonRequest('/api/workspaces/web:missing', { name: 'X' }, adminCookie, 'PATCH'),
+    );
+    expect(missingWsPatch.status).toBe(404);
+    const missingWsDelete = await app.request(
+      '/api/workspaces/web:missing',
+      { method: 'DELETE', ...cookieRequest(adminCookie) },
+    );
+    expect(missingWsDelete.status).toBe(404);
+
+    const missingAgentPatch = await app.request(
+      '/api/agent-profiles/ap_missing',
+      jsonRequest('/api/agent-profiles/ap_missing', { name: 'X' }, adminCookie, 'PATCH'),
+    );
+    expect(missingAgentPatch.status).toBe(404);
+    const missingAgentVersions = await app.request(
+      '/api/agent-profiles/ap_missing/prompt-versions',
+      cookieRequest(adminCookie),
+    );
+    expect(missingAgentVersions.status).toBe(404);
+    const missingAgentRestore = await app.request(
+      '/api/agent-profiles/ap_missing/prompt-versions/1/restore',
+      { method: 'POST', ...cookieRequest(adminCookie) },
+    );
+    expect(missingAgentRestore.status).toBe(404);
+
+    const jid = await createWorkspaceViaApi(app, adminCookie, 'W');
+    const missingSessionPatch = await app.request(
+      `/api/workspaces/${jid}/runtime-sessions/rs_missing`,
+      jsonRequest(
+        `/api/workspaces/${jid}/runtime-sessions/rs_missing`,
+        { name: 'X' },
+        adminCookie,
+        'PATCH',
+      ),
+    );
+    expect(missingSessionPatch.status).toBe(404);
+    const missingSessionDelete = await app.request(
+      `/api/workspaces/${jid}/runtime-sessions/rs_missing`,
+      { method: 'DELETE', ...cookieRequest(adminCookie) },
+    );
+    expect(missingSessionDelete.status).toBe(404);
+    const missingSessionMounts = await app.request(
+      `/api/workspaces/${jid}/runtime-sessions/rs_missing/channel-mounts`,
+      cookieRequest(adminCookie),
+    );
+    expect(missingSessionMounts.status).toBe(404);
+
+    const missingAccount = await app.request(
+      '/api/channel-accounts/ca_missing',
+      cookieRequest(adminCookie),
+    );
+    expect(missingAccount.status).toBe(404);
+    const missingAccountPatch = await app.request(
+      '/api/channel-accounts/ca_missing',
+      jsonRequest(
+        '/api/channel-accounts/ca_missing',
+        { enabled: false },
+        adminCookie,
+        'PATCH',
+      ),
+    );
+    expect(missingAccountPatch.status).toBe(404);
+    const missingAccountDelete = await app.request(
+      '/api/channel-accounts/ca_missing',
+      { method: 'DELETE', ...cookieRequest(adminCookie) },
+    );
+    expect(missingAccountDelete.status).toBe(404);
+
+    const dup1 = await app.request(
+      '/api/channel-accounts',
+      jsonRequest(
+        '/api/channel-accounts',
+        { provider: 'telegram', name: 'Dup' },
+        adminCookie,
+      ),
+    );
+    expect(dup1.status).toBe(201);
+    const dup2 = await app.request(
+      '/api/channel-accounts',
+      jsonRequest(
+        '/api/channel-accounts',
+        { provider: 'telegram', name: 'Dup' },
+        adminCookie,
+      ),
+    );
+    expect(dup2.status).toBe(409);
+
+    const agent = await createAgent(app, adminCookie, { name: 'A' });
+    const versionMissing = await app.request(
+      `/api/agent-profiles/${agent}/prompt-versions/999/restore`,
+      { method: 'POST', ...cookieRequest(adminCookie) },
+    );
+    expect(versionMissing.status).toBe(404);
+  });
 });
