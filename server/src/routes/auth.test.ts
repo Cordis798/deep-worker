@@ -129,4 +129,48 @@ describe('auth routes', () => {
     );
     expect(dup.status).toBe(400);
   });
+
+  it('consumes a valid invite and rejects an exhausted or invalid one', async () => {
+    const { app } = makeApp();
+    const adminCookie = await setupAdmin(app);
+
+    const invite = await app.request(
+      '/api/admin/invites',
+      jsonRequest('/api/admin/invites', { max_uses: 1 }, adminCookie),
+    );
+    expect(invite.status).toBe(201);
+    const { invite: created } = (await invite.json()) as {
+      invite: { code: string };
+    };
+
+    const ok = await app.request(
+      '/api/auth/register',
+      jsonRequest('/api/auth/register', {
+        username: 'carol',
+        password: 'password123',
+        invite_code: created.code,
+      }),
+    );
+    expect(ok.status).toBe(201);
+
+    const exhausted = await app.request(
+      '/api/auth/register',
+      jsonRequest('/api/auth/register', {
+        username: 'dave',
+        password: 'password123',
+        invite_code: created.code,
+      }),
+    );
+    expect(exhausted.status).toBe(400);
+
+    const invalid = await app.request(
+      '/api/auth/register',
+      jsonRequest('/api/auth/register', {
+        username: 'erin',
+        password: 'password123',
+        invite_code: 'no-such-code',
+      }),
+    );
+    expect(invalid.status).toBe(400);
+  });
 });
