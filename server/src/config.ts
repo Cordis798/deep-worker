@@ -1,4 +1,6 @@
 import path from 'node:path';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
 
 export const PROJECT_ROOT = process.cwd();
 export const DATA_DIR = path.join(PROJECT_ROOT, 'data');
@@ -9,6 +11,9 @@ export const DEFAULT_WEB_PORT = 3000;
 export const DEFAULT_HOST = '0.0.0.0';
 export const DEFAULT_LOG_LEVEL = 'info';
 export const DEFAULT_TIMEZONE = 'Asia/Shanghai';
+export const SESSION_COOKIE_NAME_SECURE = '__Host-dw_session';
+export const SESSION_COOKIE_NAME_PLAIN = 'dw_session';
+const SESSION_SECRET_FILE = path.join(DATA_DIR, 'config', 'session-secret.key');
 
 export function webPort(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.WEB_PORT ?? '';
@@ -63,4 +68,67 @@ export function redactConfig(
     }
   }
   return output;
+}
+
+let cachedSessionSecret: string | null = null;
+
+/**
+ * Session-signing secret, persisted to a 0600 file so sessions survive
+ * restarts. An explicit WEB_SESSION_SECRET env var takes precedence.
+ */
+export function getSessionSecret(): string {
+  if (cachedSessionSecret) return cachedSessionSecret;
+  if (process.env.WEB_SESSION_SECRET) {
+    cachedSessionSecret = process.env.WEB_SESSION_SECRET;
+    return cachedSessionSecret;
+  }
+  try {
+    if (fs.existsSync(SESSION_SECRET_FILE)) {
+      const stored = fs.readFileSync(SESSION_SECRET_FILE, 'utf-8').trim();
+      if (stored) {
+        cachedSessionSecret = stored;
+        return stored;
+      }
+    }
+  } catch {
+    // fall through and generate
+  }
+  const generated = crypto.randomBytes(32).toString('hex');
+  try {
+    fs.mkdirSync(path.dirname(SESSION_SECRET_FILE), { recursive: true });
+    fs.writeFileSync(SESSION_SECRET_FILE, `${generated}\n`, {
+      encoding: 'utf-8',
+      mode: 0o600,
+    });
+  } catch {
+    // non-fatal: secret works for this process only
+  }
+  cachedSessionSecret = generated;
+  return generated;
+}
+
+export function trustProxy(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.TRUST_PROXY === 'true';
+}
+
+export function maxLoginAttempts(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number.parseInt(env.MAX_LOGIN_ATTEMPTS ?? '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 5;
+}
+
+export function loginLockoutMinutes(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const raw = Number.parseInt(env.LOGIN_LOCKOUT_MINUTES ?? '', 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 15;
+}
+
+export function allowRegistration(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return env.ALLOW_REGISTRATION !== 'false';
+}
+
+export function requireInviteCode(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.REQUIRE_INVITE_CODE === 'true';
 }

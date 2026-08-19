@@ -32,6 +32,13 @@ describe('sqlite migration framework', () => {
         )
         .get(),
     ).toBeTruthy();
+    expect(
+      db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'",
+        )
+        .get(),
+    ).toBeTruthy();
     db.close();
   });
 
