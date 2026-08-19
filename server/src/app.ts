@@ -5,7 +5,10 @@ import { initDatabase } from './db/migration.js';
 import { logger } from './logger.js';
 import type { AppVariables } from './types.js';
 import { createAdminRoutes } from './routes/admin.js';
+import { createAgentProfileRoutes } from './routes/agent-profiles.js';
 import { createAuthRoutes } from './routes/auth.js';
+import { createChannelAccountRoutes } from './routes/channel-accounts.js';
+import { createWorkspaceRoutes } from './routes/workspaces.js';
 
 export type App = Hono<{ Variables: AppVariables }>;
 
@@ -35,6 +38,9 @@ export function createApp(options: { db?: Database.Database } = {}): App {
   );
   app.route('/api/auth', createAuthRoutes(db));
   app.route('/api/admin', createAdminRoutes(db));
+  app.route('/api/agent-profiles', createAgentProfileRoutes(db));
+  app.route('/api/workspaces', createWorkspaceRoutes(db));
+  app.route('/api/channel-accounts', createChannelAccountRoutes(db));
 
   return app;
 }
