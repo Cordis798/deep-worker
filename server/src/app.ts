@@ -1,18 +1,17 @@
 import crypto from 'node:crypto';
 import { Hono } from 'hono';
+import type Database from 'better-sqlite3';
+import { initDatabase } from './db/migration.js';
 import { logger } from './logger.js';
+import type { AppVariables } from './types.js';
+import { createAdminRoutes } from './routes/admin.js';
+import { createAuthRoutes } from './routes/auth.js';
 
-type AppEnv = {
-  Variables: {
-    requestId: string;
-  };
-};
+export type App = Hono<{ Variables: AppVariables }>;
 
-export type App = Hono<AppEnv>;
-
-export function createApp(): App {
-  const app = new Hono<AppEnv>();
-
+export function createApp(options: { db?: Database.Database } = {}): App {
+  const db = options.db ?? initDatabase(':memory:');
+  const app = new Hono<{ Variables: AppVariables }>();
   app.use(async (c, next) => {
     const requestId = c.req.header('x-request-id') ?? crypto.randomUUID();
     c.set('requestId', requestId);
@@ -34,6 +33,8 @@ export function createApp(): App {
   app.get('/healthz', (c) =>
     c.json({ status: 'ok', uptime: Math.round(process.uptime()) }),
   );
+  app.route('/api/auth', createAuthRoutes(db));
+  app.route('/api/admin', createAdminRoutes(db));
 
   return app;
 }

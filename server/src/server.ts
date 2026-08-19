@@ -50,14 +50,16 @@ export function startServer(options: StartServerOptions): Promise<ServerHandle> 
 }
 
 export async function main(): Promise<void> {
+  let db: ReturnType<typeof openDatabase> | undefined;
   try {
-    openDatabase();
+    db = openDatabase();
   } catch (error) {
     logger.fatal({ err: error }, 'Database initialization failed');
     process.exit(1);
   }
+  if (!db) process.exit(1);
 
-  const app = createApp();
+  const app = createApp({ db });
   let handle: ServerHandle;
   try {
     handle = await startServer({ app, port: webPort(), host: hostName() });
