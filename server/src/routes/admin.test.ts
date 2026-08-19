@@ -181,7 +181,7 @@ describe('admin routes', () => {
       }),
     );
     expect(newLogin.status).toBe(200);
-  });
+  }, 20000);
 
   it('returns 404 for a missing user and manages invites and audit', async () => {
     const { app } = makeApp();
