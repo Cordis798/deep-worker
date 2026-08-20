@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 export class MigrationError extends Error {}
 
@@ -314,12 +314,40 @@ function createRunnerReliabilityTables(db: Database.Database): void {
   `);
 }
 
+function createChannelReliabilityTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS channel_outbox (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      channel_account_id TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      source_message_id TEXT,
+      kind TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT NOT NULL,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      delivered_at TEXT,
+      FOREIGN KEY (owner_user_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_channel_outbox_ready
+      ON channel_outbox(status, next_attempt_at, created_at);
+    CREATE INDEX IF NOT EXISTS idx_channel_outbox_account
+      ON channel_outbox(channel_account_id, status);
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
   { version: 3, name: 'auth_tables', up: createAuthTables },
   { version: 4, name: 'domain_tables', up: createDomainTables },
   { version: 5, name: 'runner_reliability_tables', up: createRunnerReliabilityTables },
+  { version: 6, name: 'channel_reliability_tables', up: createChannelReliabilityTables },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {

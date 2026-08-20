@@ -17,6 +17,7 @@ export class FakeTransport implements ChannelTransport {
   connected = false;
   connectCount = 0;
   sent: FakeSentItem[] = [];
+  private failNext = false;
 
   async connect(_credentials: ChannelCredentials, callbacks: TransportCallbacks): Promise<void> {
     this.callbacks = callbacks;
@@ -35,6 +36,10 @@ export class FakeTransport implements ChannelTransport {
   dropConnection(error = new Error('Fake transport disconnected')): void {
     this.connected = false;
     this.callbacks?.onDisconnect(error);
+  }
+
+  failNextDelivery(): void {
+    this.failNext = true;
   }
 
   async sendMessage(target: TransportTarget, text: string): Promise<void> {
@@ -59,5 +64,9 @@ export class FakeTransport implements ChannelTransport {
 
   private ensureConnected(): void {
     if (!this.connected) throw new Error('Fake transport is disconnected');
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error('Fake transport delivery failed');
+    }
   }
 }
