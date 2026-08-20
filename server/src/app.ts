@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { Hono } from 'hono';
 import type Database from 'better-sqlite3';
+import type { AgentRunner } from '@deep-worker/pi-runner';
+import { PiRunner } from '@deep-worker/pi-runner';
+import { DATA_DIR } from './config.js';
 import { initDatabase } from './db/migration.js';
 import { logger } from './logger.js';
 import type { AppVariables } from './types.js';
@@ -9,11 +13,28 @@ import { createAgentProfileRoutes } from './routes/agent-profiles.js';
 import { createAuthRoutes } from './routes/auth.js';
 import { createChannelAccountRoutes } from './routes/channel-accounts.js';
 import { createWorkspaceRoutes } from './routes/workspaces.js';
+import { createRunnerRoutes } from './routes/runner.js';
+import { RuntimeRunnerService } from './runtime-runner-service.js';
 
-export type App = Hono<{ Variables: AppVariables }>;
+export type App = Hono<{ Variables: AppVariables }> & {
+  close: () => Promise<void>;
+};
 
-export function createApp(options: { db?: Database.Database } = {}): App {
+export function createApp(
+  options: {
+    db?: Database.Database;
+    runner?: AgentRunner;
+    runnerService?: RuntimeRunnerService;
+  } = {},
+): App {
   const db = options.db ?? initDatabase(':memory:');
+  const runner =
+    options.runner ??
+    new PiRunner({
+      baseDir: path.join(DATA_DIR, 'pi-sessions'),
+      queueOptions: { maxAttempts: 1 },
+    });
+  const runnerService = options.runnerService ?? new RuntimeRunnerService({ db, runner });
   const app = new Hono<{ Variables: AppVariables }>();
   app.use(async (c, next) => {
     const requestId = c.req.header('x-request-id') ?? crypto.randomUUID();
@@ -33,14 +54,18 @@ export function createApp(options: { db?: Database.Database } = {}): App {
     );
   });
 
-  app.get('/healthz', (c) =>
-    c.json({ status: 'ok', uptime: Math.round(process.uptime()) }),
-  );
+  app.get('/healthz', (c) => c.json({ status: 'ok', uptime: Math.round(process.uptime()) }));
   app.route('/api/auth', createAuthRoutes(db));
   app.route('/api/admin', createAdminRoutes(db));
   app.route('/api/agent-profiles', createAgentProfileRoutes(db));
   app.route('/api/workspaces', createWorkspaceRoutes(db));
+  app.route('/api/workspaces', createRunnerRoutes(db, runnerService));
   app.route('/api/channel-accounts', createChannelAccountRoutes(db));
 
-  return app;
+  void runnerService.resumePending().catch((error) => {
+    logger.error({ err: error }, 'Runner recovery failed');
+  });
+  return Object.assign(app, {
+    close: () => runnerService.close(),
+  });
 }

@@ -27,30 +27,20 @@ describe('sqlite migration framework', () => {
     expect(readSchemaVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
     expect(
       db
-        .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_meta'",
-        )
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_meta'")
+        .get(),
+    ).toBeTruthy();
+    expect(
+      db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'").get(),
+    ).toBeTruthy();
+    expect(
+      db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_profiles'")
         .get(),
     ).toBeTruthy();
     expect(
       db
-        .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'users'",
-        )
-        .get(),
-    ).toBeTruthy();
-    expect(
-      db
-        .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_profiles'",
-        )
-        .get(),
-    ).toBeTruthy();
-    expect(
-      db
-        .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workspaces'",
-        )
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workspaces'")
         .get(),
     ).toBeTruthy();
     expect(
@@ -76,9 +66,7 @@ describe('sqlite migration framework', () => {
     ).toBeTruthy();
     expect(
       db
-        .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'channel_mounts'",
-        )
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'channel_mounts'")
         .get(),
     ).toBeTruthy();
     expect(
@@ -95,6 +83,21 @@ describe('sqlite migration framework', () => {
         )
         .get(),
     ).toBeTruthy();
+    expect(
+      db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runner_inbox'")
+        .get(),
+    ).toBeTruthy();
+    expect(
+      db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runner_turns'")
+        .get(),
+    ).toBeTruthy();
+    expect(
+      db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runner_outbox'")
+        .get(),
+    ).toBeTruthy();
     db.close();
   });
 
@@ -108,9 +111,7 @@ describe('sqlite migration framework', () => {
     expect(readSchemaVersion(upgraded)).toBe(CURRENT_SCHEMA_VERSION);
     expect(
       upgraded
-        .prepare(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runtime_flags'",
-        )
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runtime_flags'")
         .get(),
     ).toBeTruthy();
     upgraded.close();
@@ -119,12 +120,10 @@ describe('sqlite migration framework', () => {
   it('refuses to downgrade a database newer than head', () => {
     const dbPath = path.join(dir, 'deep-worker.db');
     const db = new Database(dbPath);
-    db.exec(
-      'CREATE TABLE config_kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)',
+    db.exec('CREATE TABLE config_kv (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)');
+    db.prepare("INSERT INTO config_kv (key, value) VALUES ('schema_version', ?)").run(
+      String(CURRENT_SCHEMA_VERSION + 1),
     );
-    db.prepare(
-      "INSERT INTO config_kv (key, value) VALUES ('schema_version', ?)",
-    ).run(String(CURRENT_SCHEMA_VERSION + 1));
     db.close();
 
     expect(() => initDatabase(dbPath)).toThrow(MigrationError);

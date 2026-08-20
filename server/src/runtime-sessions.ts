@@ -19,13 +19,24 @@ export function generateRuntimeSessionId(): string {
   return `rs_${crypto.randomUUID()}`;
 }
 
-export function getRuntimeSessionById(
+export function getRuntimeSessionById(db: Db, id: string): RuntimeSessionRow | undefined {
+  return db.prepare('SELECT * FROM runtime_sessions WHERE id = ?').get(id) as
+    RuntimeSessionRow | undefined;
+}
+
+export function getOwnedRuntimeSession(
   db: Db,
+  ownerUserId: string,
+  workspaceJid: string,
   id: string,
 ): RuntimeSessionRow | undefined {
   return db
-    .prepare('SELECT * FROM runtime_sessions WHERE id = ?')
-    .get(id) as RuntimeSessionRow | undefined;
+    .prepare(
+      `SELECT r.* FROM runtime_sessions r
+       JOIN workspaces w ON w.jid = r.workspace_jid
+       WHERE r.id = ? AND r.workspace_jid = ? AND w.owner_user_id = ?`,
+    )
+    .get(id, workspaceJid, ownerUserId) as RuntimeSessionRow | undefined;
 }
 
 export function listRuntimeSessions(
@@ -35,9 +46,7 @@ export function listRuntimeSessions(
 ): RuntimeSessionRow[] | undefined {
   if (!getOwnedWorkspace(db, ownerUserId, workspaceJid)) return undefined;
   return db
-    .prepare(
-      'SELECT * FROM runtime_sessions WHERE workspace_jid = ? ORDER BY updated_at DESC',
-    )
+    .prepare('SELECT * FROM runtime_sessions WHERE workspace_jid = ? ORDER BY updated_at DESC')
     .all(workspaceJid) as RuntimeSessionRow[];
 }
 
@@ -50,11 +59,7 @@ export function createRuntimeSession(
   const ws = getOwnedWorkspace(db, ownerUserId, workspaceJid);
   if (!ws) return { ok: false, reason: 'workspace_not_found' };
   if (fields.agent_profile_id) {
-    const profile = getOwnedAgentProfile(
-      db,
-      ownerUserId,
-      fields.agent_profile_id,
-    );
+    const profile = getOwnedAgentProfile(db, ownerUserId, fields.agent_profile_id);
     if (!profile) return { ok: false, reason: 'invalid_profile' };
   }
   const now = new Date().toISOString();

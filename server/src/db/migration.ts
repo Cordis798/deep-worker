@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * Exported so migration tests can assert "an old database reaches head"
  * without restating the number.
  */
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 export class MigrationError extends Error {}
 
@@ -244,11 +244,82 @@ function createDomainTables(db: Database.Database): void {
   `);
 }
 
+function createRunnerReliabilityTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS runner_inbox (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      workspace_jid TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL,
+      available_at TEXT NOT NULL,
+      attempt INTEGER NOT NULL DEFAULT 0,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT,
+      FOREIGN KEY (owner_user_id) REFERENCES users(id),
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE,
+      FOREIGN KEY (session_id) REFERENCES runtime_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_runner_inbox_ready
+      ON runner_inbox(status, available_at, created_at);
+    CREATE INDEX IF NOT EXISTS idx_runner_inbox_session
+      ON runner_inbox(session_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS runner_turns (
+      id TEXT PRIMARY KEY,
+      inbox_id TEXT NOT NULL UNIQUE,
+      owner_user_id TEXT NOT NULL,
+      workspace_jid TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      available_at TEXT NOT NULL,
+      attempt INTEGER NOT NULL DEFAULT 0,
+      lease_owner TEXT,
+      lease_expires_at TEXT,
+      result_text TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      FOREIGN KEY (inbox_id) REFERENCES runner_inbox(id) ON DELETE CASCADE,
+      FOREIGN KEY (owner_user_id) REFERENCES users(id),
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE,
+      FOREIGN KEY (session_id) REFERENCES runtime_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_runner_turns_ready
+      ON runner_turns(status, available_at, created_at);
+    CREATE INDEX IF NOT EXISTS idx_runner_turns_session
+      ON runner_turns(session_id, status, created_at);
+
+    CREATE TABLE IF NOT EXISTS runner_outbox (
+      id TEXT PRIMARY KEY,
+      turn_id TEXT NOT NULL,
+      ordinal INTEGER NOT NULL,
+      event_json TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      delivered_at TEXT,
+      UNIQUE(turn_id, ordinal),
+      FOREIGN KEY (turn_id) REFERENCES runner_turns(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_runner_outbox_pending
+      ON runner_outbox(status, created_at);
+    CREATE INDEX IF NOT EXISTS idx_runner_outbox_turn
+      ON runner_outbox(turn_id, ordinal);
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
   { version: 3, name: 'auth_tables', up: createAuthTables },
   { version: 4, name: 'domain_tables', up: createDomainTables },
+  { version: 5, name: 'runner_reliability_tables', up: createRunnerReliabilityTables },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {
@@ -259,9 +330,8 @@ function tableExists(db: Database.Database, name: string): boolean {
 
 export function readSchemaVersion(db: Database.Database): number {
   if (!tableExists(db, 'config_kv')) return 0;
-  const row = db
-    .prepare('SELECT value FROM config_kv WHERE key = ?')
-    .get('schema_version') as { value?: string } | undefined;
+  const row = db.prepare('SELECT value FROM config_kv WHERE key = ?').get('schema_version') as
+    { value?: string } | undefined;
   if (!row || row.value == null) return 0;
   const version = Number(row.value);
   return Number.isInteger(version) && version >= 0 ? version : -1;

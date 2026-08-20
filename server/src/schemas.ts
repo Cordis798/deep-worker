@@ -1,11 +1,7 @@
 import { z } from 'zod';
 
 const nonEmptyString = (label: string, max: number) =>
-  z
-    .string()
-    .trim()
-    .min(1, `${label} 不能为空`)
-    .max(max, `${label} 长度不能超过 ${max}`);
+  z.string().trim().min(1, `${label} 不能为空`).max(max, `${label} 长度不能超过 ${max}`);
 
 export const createAgentProfileSchema = z.object({
   name: nonEmptyString('名称', 120),
@@ -59,15 +55,7 @@ export const updateRuntimeSessionSchema = z
   });
 
 export const createChannelAccountSchema = z.object({
-  provider: z.enum([
-    'feishu',
-    'telegram',
-    'qq',
-    'dingtalk',
-    'wechat',
-    'discord',
-    'whatsapp',
-  ]),
+  provider: z.enum(['feishu', 'telegram', 'qq', 'dingtalk', 'wechat', 'discord', 'whatsapp']),
   name: nonEmptyString('账号名', 80),
   is_default: z.boolean().optional(),
   default_workspace_jid: z.string().optional().nullable(),
@@ -88,6 +76,13 @@ export const bindChatSchema = z.object({
   im_jid: nonEmptyString('渠道 JID', 256),
   channel_type: z.enum(['group', 'private']),
   channel_account_id: z.string().optional(),
+});
+
+export const createRunnerMessageSchema = z.object({
+  message: nonEmptyString('消息', 50_000),
+  idempotency_key: nonEmptyString('幂等键', 200).optional(),
+  system_prompt: z.string().max(20_000).optional(),
+  output_contract: z.string().max(20_000).optional(),
 });
 
 export function formatZodError(error: z.ZodError): string {

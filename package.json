@@ -6,9 +6,9 @@
   "type": "module",
   "workspaces": [
     "shared",
+    "pi-runner",
     "server",
-    "web",
-    "pi-runner"
+    "web"
   ],
   "engines": {
     "node": ">=20"

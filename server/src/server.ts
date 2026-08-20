@@ -76,6 +76,7 @@ export async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Shutting down');
     await handle.close();
+    await app.close();
     process.exit(0);
   };
   process.once('SIGINT', () => void shutdown('SIGINT'));
