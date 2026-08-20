@@ -11,6 +11,7 @@ import { LoginPage } from './pages/LoginPage.js';
 import { RegisterPage } from './pages/RegisterPage.js';
 import { RoutePlaceholder } from './pages/RoutePlaceholder.js';
 import { SetupPage } from './pages/SetupPage.js';
+import { ChatPage } from './pages/ChatPage.js';
 
 const routes = createRoutesFromElements(
   <>
@@ -20,7 +21,7 @@ const routes = createRoutesFromElements(
     <Route path="/setup/providers" element={<AuthGuard><RoutePlaceholder title="配置 Provider" /></AuthGuard>} />
     <Route path="/setup/channels" element={<AuthGuard><RoutePlaceholder title="配置渠道" /></AuthGuard>} />
     <Route element={<AuthGuard><AppLayout /></AuthGuard>}>
-      <Route path="/chat/:workspaceId?" element={<RoutePlaceholder title="聊天" />} />
+      <Route path="/chat/:workspaceId?" element={<ChatPage />} />
       <Route path="/groups" element={<Navigate to="/chat" replace />} />
       <Route path="/agent-profiles" element={<RoutePlaceholder title="Agent 管理" />} />
       <Route path="/files" element={<RoutePlaceholder title="文件" />} />
