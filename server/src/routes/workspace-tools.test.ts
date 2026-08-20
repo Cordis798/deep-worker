@@ -70,4 +70,15 @@ describe('Workspace files and terminal routes', () => {
     expect(listBody.sessions[0]?.degraded).toBe(true);
     await app.close();
   });
+
+  it('rejects paths that escape the workspace', async () => {
+    const app = createApp({ db: initDatabase(':memory:'), runner: new FakePiRunner() });
+    const { cookie, jid } = await setupWorkspace(app);
+    const response = await app.request(`/api/workspaces/${jid}/files?path=..%2Foutside`, {
+      headers: { cookie: `dw_session=${cookie}` },
+    });
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: string }).error).toContain('工作区');
+    await app.close();
+  });
 });

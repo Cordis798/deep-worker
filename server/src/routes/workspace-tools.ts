@@ -30,7 +30,7 @@ function workspaceRoot(jid: string) {
 function relativePath(input: string | undefined) {
   const normalized = path.posix.normalize((input ?? '').replaceAll('\\', '/'));
   if (normalized === '.' || normalized === '') return '';
-  if (normalized.startsWith('/') || normalized === '..' || normalized.startsWith('../')) {
+  if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized) || normalized === '..' || normalized.startsWith('../')) {
     throw new Error('路径不能越过工作区目录');
   }
   return normalized;
@@ -119,7 +119,9 @@ export function createWorkspaceToolsRoutes(
     if (!body.name?.trim() || /[\\/]/.test(body.name)) return c.json({ error: '目录名无效' }, 400);
     try {
       const parent = relativePath(body.path);
-      await fs.mkdir(safePath(workspaceRoot(workspace.jid), `${parent ? `${parent}/` : ''}${body.name.trim()}`), { recursive: false });
+      const root = workspaceRoot(workspace.jid);
+      await ensureRoot(root);
+      await fs.mkdir(safePath(root, `${parent ? `${parent}/` : ''}${body.name.trim()}`), { recursive: false });
       return c.json({ success: true }, 201);
     } catch (error) {
       return c.json({ error: error instanceof Error ? error.message : '创建目录失败' }, 400);
