@@ -14,6 +14,10 @@ import { SetupPage } from './pages/SetupPage.js';
 import { ChatPage } from './pages/ChatPage.js';
 import { FilesPage } from './pages/FilesPage.js';
 import { TerminalPage } from './pages/TerminalPage.js';
+import { AgentProfilesPage } from './pages/AgentProfilesPage.js';
+import { SettingsPage } from './pages/SettingsPage.js';
+import { MonitorPage } from './pages/MonitorPage.js';
+import { UsersPage } from './pages/UsersPage.js';
 
 const routes = createRoutesFromElements(
   <>
@@ -25,12 +29,12 @@ const routes = createRoutesFromElements(
     <Route element={<AuthGuard><AppLayout /></AuthGuard>}>
       <Route path="/chat/:workspaceId?" element={<ChatPage />} />
       <Route path="/groups" element={<Navigate to="/chat" replace />} />
-      <Route path="/agent-profiles" element={<RoutePlaceholder title="Agent 管理" />} />
+      <Route path="/agent-profiles" element={<AgentProfilesPage />} />
       <Route path="/files" element={<FilesPage />} />
       <Route path="/terminal" element={<TerminalPage />} />
-      <Route path="/settings" element={<RoutePlaceholder title="设置" />} />
-      <Route path="/monitor" element={<AuthGuard requiredPermission="manage_system_config"><RoutePlaceholder title="监控" /></AuthGuard>} />
-      <Route path="/users" element={<AuthGuard requiredAnyPermissions={['manage_users', 'manage_invites', 'view_audit_log']}><RoutePlaceholder title="用户管理" /></AuthGuard>} />
+      <Route path="/settings" element={<SettingsPage />} />
+      <Route path="/monitor" element={<AuthGuard requiredPermission="manage_system_config"><MonitorPage /></AuthGuard>} />
+      <Route path="/users" element={<AuthGuard requiredAnyPermissions={['manage_users', 'manage_invites', 'view_audit_log']}><UsersPage /></AuthGuard>} />
       <Route path="/capabilities/:section?" element={<RoutePlaceholder title="能力" />} />
       <Route path="/tasks" element={<RoutePlaceholder title="任务" />} />
       <Route path="/memory" element={<RoutePlaceholder title="记忆" />} />
