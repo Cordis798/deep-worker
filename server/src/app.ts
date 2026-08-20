@@ -15,6 +15,7 @@ import { createAuthRoutes } from './routes/auth.js';
 import { createChannelAccountRoutes } from './routes/channel-accounts.js';
 import { createWorkspaceRoutes } from './routes/workspaces.js';
 import { createRunnerRoutes } from './routes/runner.js';
+import { createWorkspaceToolsRoutes } from './routes/workspace-tools.js';
 import { RuntimeRunnerService } from './runtime-runner-service.js';
 
 export type App = Hono<{ Variables: AppVariables }> & {
@@ -39,6 +40,7 @@ export function createApp(
   const runnerService = options.runnerService ?? new RuntimeRunnerService({ db, runner });
   const app = new Hono<{ Variables: AppVariables }>();
   const nodeWebSocket = createNodeWebSocket({ app });
+  const workspaceTools = createWorkspaceToolsRoutes(db, nodeWebSocket.upgradeWebSocket);
   app.use(async (c, next) => {
     const requestId = c.req.header('x-request-id') ?? crypto.randomUUID();
     c.set('requestId', requestId);
@@ -66,13 +68,17 @@ export function createApp(
     '/api/workspaces',
     createRunnerRoutes(db, runnerService, nodeWebSocket.upgradeWebSocket),
   );
+  app.route('/api/workspaces', workspaceTools);
   app.route('/api/channel-accounts', createChannelAccountRoutes(db));
 
   void runnerService.resumePending().catch((error) => {
     logger.error({ err: error }, 'Runner recovery failed');
   });
   return Object.assign(app, {
-    close: () => runnerService.close(),
+    close: async () => {
+      await workspaceTools.close();
+      await runnerService.close();
+    },
     injectWebSocket: nodeWebSocket.injectWebSocket,
   });
 }
