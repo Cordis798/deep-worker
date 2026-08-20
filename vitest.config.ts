@@ -6,7 +6,7 @@ export default defineConfig({
       'server/src/**/*.test.ts',
       'shared/src/**/*.test.ts',
       'pi-runner/src/**/*.test.ts',
-      'web/src/**/*.test.ts',
+      'web/src/**/*.test.{ts,tsx}',
     ],
     exclude: ['**/node_modules/**', '**/dist/**', '**/data/**'],
   },
