@@ -128,7 +128,25 @@ export function createChannelMountService(db: Db) {
   function bindSession(input: { ownerUserId: string; chatJid: string; workspaceJid: string; sessionId: string; accountId: string }) {
     const parsed = parseChannelJid(input.chatJid);
     if (!parsed || parsed.channelAccountId !== input.accountId) return { ok: false as const, reason: 'account_not_found' as const };
-    return bindSessionChat(db, input.ownerUserId, channelConversationKey(input.chatJid), input.sessionId, { imJid: channelConversationKey(input.chatJid), channelType: 'private', channelAccountId: input.accountId });
+    return bindSessionChat(db, input.ownerUserId, input.workspaceJid, input.sessionId, { imJid: channelConversationKey(input.chatJid), channelType: 'private', channelAccountId: input.accountId });
+  }
+
+  function createPrivateSession(input: { ownerUserId: string; message: ChannelInboundMessage; name?: string }): ResolveInboundResult {
+    const { ownerUserId, message } = input;
+    const account = getOwnedChannelAccount(db, ownerUserId, message.accountId);
+    if (!account || account.provider !== message.provider) return { status: 'unavailable', reason: 'account_not_found' };
+    if (account.enabled !== 1) return { status: 'unavailable', reason: 'account_disabled' };
+    const sourceJid = channelConversationKey(message.chatJid);
+    const existing = getSessionMount(db, sourceJid);
+    const workspaceJid = existing?.workspace_jid ?? account.default_workspace_jid;
+    if (!workspaceJid || !getOwnedWorkspace(db, ownerUserId, workspaceJid)) return { status: 'unavailable', reason: 'default_workspace_missing' };
+    db.prepare('DELETE FROM agent_channel_mounts WHERE im_jid = ? AND owner_user_id = ?').run(sourceJid, ownerUserId);
+    const session = createSession(ownerUserId, workspaceJid, 'private', null);
+    if (!session) return { status: 'unavailable', reason: 'default_workspace_missing' };
+    if (input.name?.trim()) db.prepare('UPDATE runtime_sessions SET name = ?, updated_at = ? WHERE id = ?').run(input.name.trim(), new Date().toISOString(), session.id);
+    const result = bindSession({ ownerUserId, chatJid: message.chatJid, workspaceJid, sessionId: session.id, accountId: message.accountId });
+    if (!result.ok) return { status: 'unavailable', reason: 'default_workspace_missing' };
+    return { status: 'resolved', created: true, route: { ownerUserId, provider: message.provider, accountId: message.accountId, sourceJid, chatJid: message.chatJid, workspaceJid, sessionId: session.id, contextType: 'private', contextId: sourceJid, nativeContext: null } };
   }
 
   function unbind(input: { ownerUserId: string; chatJid: string }): boolean {
@@ -141,5 +159,5 @@ export function createChannelMountService(db: Db) {
     })();
   }
 
-  return { resolveInbound, bindWorkspace, bindSession, unbind };
+  return { resolveInbound, bindWorkspace, bindSession, createPrivateSession, unbind };
 }
