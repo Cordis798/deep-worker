@@ -5,25 +5,29 @@ import {
   createBrowserRouter,
   createRoutesFromElements,
 } from 'react-router-dom';
+import { AuthGuard, PublicOnly } from './components/auth/AuthGuard.js';
 import { AppLayout } from './components/layout/AppLayout.js';
+import { LoginPage } from './pages/LoginPage.js';
+import { RegisterPage } from './pages/RegisterPage.js';
 import { RoutePlaceholder } from './pages/RoutePlaceholder.js';
+import { SetupPage } from './pages/SetupPage.js';
 
 const routes = createRoutesFromElements(
   <>
-    <Route path="/login" element={<RoutePlaceholder title="登录" />} />
-    <Route path="/register" element={<RoutePlaceholder title="注册" />} />
-    <Route path="/setup" element={<RoutePlaceholder title="初始化管理员" />} />
-    <Route path="/setup/providers" element={<RoutePlaceholder title="配置 Provider" />} />
-    <Route path="/setup/channels" element={<RoutePlaceholder title="配置渠道" />} />
-    <Route element={<AppLayout />}>
+    <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
+    <Route path="/register" element={<PublicOnly><RegisterPage /></PublicOnly>} />
+    <Route path="/setup" element={<SetupPage />} />
+    <Route path="/setup/providers" element={<AuthGuard><RoutePlaceholder title="配置 Provider" /></AuthGuard>} />
+    <Route path="/setup/channels" element={<AuthGuard><RoutePlaceholder title="配置渠道" /></AuthGuard>} />
+    <Route element={<AuthGuard><AppLayout /></AuthGuard>}>
       <Route path="/chat/:workspaceId?" element={<RoutePlaceholder title="聊天" />} />
       <Route path="/groups" element={<Navigate to="/chat" replace />} />
       <Route path="/agent-profiles" element={<RoutePlaceholder title="Agent 管理" />} />
       <Route path="/files" element={<RoutePlaceholder title="文件" />} />
       <Route path="/terminal" element={<RoutePlaceholder title="终端" />} />
       <Route path="/settings" element={<RoutePlaceholder title="设置" />} />
-      <Route path="/monitor" element={<RoutePlaceholder title="监控" />} />
-      <Route path="/users" element={<RoutePlaceholder title="用户管理" />} />
+      <Route path="/monitor" element={<AuthGuard requiredPermission="manage_system_config"><RoutePlaceholder title="监控" /></AuthGuard>} />
+      <Route path="/users" element={<AuthGuard requiredAnyPermissions={['manage_users', 'manage_invites', 'view_audit_log']}><RoutePlaceholder title="用户管理" /></AuthGuard>} />
       <Route path="/capabilities/:section?" element={<RoutePlaceholder title="能力" />} />
       <Route path="/tasks" element={<RoutePlaceholder title="任务" />} />
       <Route path="/memory" element={<RoutePlaceholder title="记忆" />} />
