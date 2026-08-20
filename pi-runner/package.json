@@ -5,6 +5,9 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "dependencies": {
+    "@deep-worker/shared": "0.1.0"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",

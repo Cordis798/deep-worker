@@ -12,6 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@deep-worker/pi-runner": "0.1.0",
+    "@deep-worker/shared": "0.1.0",
     "@hono/node-server": "^2.1.1",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.0.3",

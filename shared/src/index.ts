@@ -10,3 +10,11 @@ export interface VersionInfo {
   package: string;
   version: string;
 }
+
+export type {
+  StreamAgentScope,
+  StreamDisplayLevel,
+  StreamEvent,
+  StreamEventType,
+  StreamUsage,
+} from './stream-event.js';
