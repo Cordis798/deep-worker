@@ -12,6 +12,8 @@ import { RegisterPage } from './pages/RegisterPage.js';
 import { RoutePlaceholder } from './pages/RoutePlaceholder.js';
 import { SetupPage } from './pages/SetupPage.js';
 import { ChatPage } from './pages/ChatPage.js';
+import { FilesPage } from './pages/FilesPage.js';
+import { TerminalPage } from './pages/TerminalPage.js';
 
 const routes = createRoutesFromElements(
   <>
@@ -24,8 +26,8 @@ const routes = createRoutesFromElements(
       <Route path="/chat/:workspaceId?" element={<ChatPage />} />
       <Route path="/groups" element={<Navigate to="/chat" replace />} />
       <Route path="/agent-profiles" element={<RoutePlaceholder title="Agent 管理" />} />
-      <Route path="/files" element={<RoutePlaceholder title="文件" />} />
-      <Route path="/terminal" element={<RoutePlaceholder title="终端" />} />
+      <Route path="/files" element={<FilesPage />} />
+      <Route path="/terminal" element={<TerminalPage />} />
       <Route path="/settings" element={<RoutePlaceholder title="设置" />} />
       <Route path="/monitor" element={<AuthGuard requiredPermission="manage_system_config"><RoutePlaceholder title="监控" /></AuthGuard>} />
       <Route path="/users" element={<AuthGuard requiredAnyPermissions={['manage_users', 'manage_invites', 'view_audit_log']}><RoutePlaceholder title="用户管理" /></AuthGuard>} />
