@@ -220,7 +220,7 @@ export function createWorkspaceToolsRoutes(
     const user = c.get('user')!;
     const workspace = getOwnedWorkspace(db, user.id, c.req.param('jid'));
     if (!workspace) return c.json({ error: 'Workspace not found' }, 404);
-    return c.json({ sessions: [...terminals.values()].filter((session) => session.ownerUserId === user.id && session.workspaceJid === workspace.jid).map((session) => ({ id: session.id, status: session.status })) });
+    return c.json({ sessions: [...terminals.values()].filter((session) => session.ownerUserId === user.id && session.workspaceJid === workspace.jid).map((session) => ({ id: session.id, status: session.status, degraded: true })) });
   });
 
   app.post('/:jid/terminal-sessions', async (c) => {
@@ -243,7 +243,7 @@ export function createWorkspaceToolsRoutes(
     child.stderr.on('data', appendOutput);
     child.on('error', (error) => { session.status = 'failed'; publish({ type: 'status', status: 'failed', error: error.message }); });
     child.on('exit', (code) => { session.status = 'exited'; publish({ type: 'status', status: 'exited', code }); });
-    return c.json({ session: { id, status: session.status, shell: path.basename(shell) } }, 201);
+    return c.json({ session: { id, status: session.status, shell: path.basename(shell), degraded: true, notice: '当前使用 Node 子进程流，暂不提供真实 PTY 的窗口大小控制。' } }, 201);
   });
 
   app.delete('/:jid/terminal-sessions/:sessionId', (c) => {
