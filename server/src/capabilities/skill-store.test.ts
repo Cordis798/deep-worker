@@ -10,6 +10,7 @@ import {
   listSkills,
   setSkillEnabled,
   verifyBuiltinManifest,
+  verifyBuiltinManifestFile,
 } from './skill-store.js';
 
 const temporaryRoots: string[] = [];
@@ -115,5 +116,18 @@ describe('Skill 存储与导入', () => {
     expect(verifyBuiltinManifest(root, manifest)).toBe(true);
     fs.appendFileSync(path.join(skillDir, 'SKILL.md'), 'changed');
     expect(verifyBuiltinManifest(root, manifest)).toBe(false);
+  });
+
+  it('验证提交的内置 manifest 文件', () => {
+    const root = createRoot();
+    const skillDir = path.join(root, 'demo');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: demo\ndescription: test\nversion: 1.0.0\n---\n');
+    const generated = JSON.parse(JSON.stringify([{ name: 'demo', version: '1.0.0', contentHash: 'placeholder' }]));
+    generated[0].contentHash = buildBuiltinManifest(root)[0].contentHash;
+    fs.writeFileSync(path.join(root, 'manifest.json'), JSON.stringify(generated));
+    expect(verifyBuiltinManifestFile(root)).toBe(true);
+    fs.writeFileSync(path.join(root, 'manifest.json'), JSON.stringify([{ ...generated[0], contentHash: '0'.repeat(64) }]));
+    expect(verifyBuiltinManifestFile(root)).toBe(false);
   });
 });

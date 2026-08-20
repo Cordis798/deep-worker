@@ -327,6 +327,12 @@ export interface BuiltinSkillEntry {
   path: string;
 }
 
+export interface BuiltinManifestRecord {
+  name: string;
+  version: string;
+  contentHash: string;
+}
+
 export function getBuiltinSkillsDir(root = path.join(process.cwd(), 'server', 'skills')): string {
   return root;
 }
@@ -346,6 +352,23 @@ export function buildBuiltinManifest(root = getBuiltinSkillsDir()): BuiltinSkill
 export function verifyBuiltinManifest(root: string, expected: BuiltinSkillEntry[]): boolean {
   try {
     return JSON.stringify(buildBuiltinManifest(root)) === JSON.stringify(expected);
+  } catch {
+    return false;
+  }
+}
+
+export function readBuiltinManifestFile(root = getBuiltinSkillsDir()): BuiltinManifestRecord[] {
+  const file = path.join(root, 'manifest.json');
+  const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (!Array.isArray(parsed)) throw new SkillError('SKILL_MANIFEST_INVALID', '内置 Skill 清单格式无效');
+  return parsed as BuiltinManifestRecord[];
+}
+
+export function verifyBuiltinManifestFile(root = getBuiltinSkillsDir()): boolean {
+  try {
+    const expected = readBuiltinManifestFile(root);
+    const actual = buildBuiltinManifest(root).map(({ name, version, contentHash }) => ({ name, version, contentHash }));
+    return JSON.stringify(actual) === JSON.stringify(expected);
   } catch {
     return false;
   }
