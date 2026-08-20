@@ -1,13 +1,12 @@
 import { StringDecoder } from 'node:string_decoder';
 
-/** Serialize one protocol record. Pi RPC uses LF-only framing. */
+/** 将一条协议记录序列化为 JSONL；Pi RPC 使用换行符作为唯一分隔符。 */
 export function serializeJsonLine(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
 
 /**
- * Incremental LF-only decoder. U+2028/U+2029 are valid JSON string content and
- * must not be treated as record separators.
+ * 增量解析仅按换行符分帧。U+2028/U+2029 可能是 JSON 字符串内容，不能当作记录分隔符。
  */
 export class JsonlDecoder {
   private readonly decoder = new StringDecoder('utf8');

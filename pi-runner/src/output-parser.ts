@@ -6,7 +6,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** Extract user-visible text from a Pi AgentMessage or tool result. */
+/** 从 Pi 的 AgentMessage 或工具结果中提取用户可见文本。 */
 export function extractTextContent(value: unknown): string {
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) return value.map(extractTextContent).join('');
@@ -19,8 +19,7 @@ export function extractTextContent(value: unknown): string {
 }
 
 /**
- * Extract the final assistant reply without treating thinking or tool output
- * as a user-facing answer.
+ * 提取最终助手回复，不把思考过程或工具输出误当成用户答案。
  */
 export function extractFinalReply(events: readonly RpcEvent[]): string {
   let streamed = '';

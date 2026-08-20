@@ -59,7 +59,7 @@ async function createWorkspaceAndSession(
   };
 }
 
-describe('P4 runner API', () => {
+describe('Runner API', () => {
   it('runs a message through the fake runner and exposes durable events', async () => {
     const db = initDatabase(':memory:');
     const runner = new FakePiRunner({ response: 'hello from fake pi', emitBash: true });

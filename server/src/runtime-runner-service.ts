@@ -78,7 +78,7 @@ export interface RuntimeRunnerServiceOptions {
 
 const sleep = (delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs));
 
-/** Durable Inbox/Turn/Outbox orchestration around any AgentRunner. */
+/** 为任意智能体运行器提供可恢复的收件箱、执行回合和待发事件编排。 */
 export class RuntimeRunnerService {
   readonly streamHub: RunnerStreamHub;
   private readonly db: Db;

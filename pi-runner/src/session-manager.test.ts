@@ -5,6 +5,11 @@ import { PiSessionManager, type SessionClient } from './session-manager.js';
 class FakeSessionClient implements SessionClient {
   starts = 0;
   closes = 0;
+  readonly failState: boolean;
+
+  constructor(failState = false) {
+    this.failState = failState;
+  }
   async start(): Promise<void> {
     this.starts += 1;
   }
@@ -12,6 +17,7 @@ class FakeSessionClient implements SessionClient {
     this.closes += 1;
   }
   async getState(): Promise<{ sessionId: string }> {
+    if (this.failState) throw new Error('state probe failed');
     return { sessionId: 'fake' };
   }
 }
@@ -50,5 +56,20 @@ describe('PiSessionManager', () => {
     await manager.sweepIdle(Date.now() + 200);
     expect(clients[1].closes).toBe(1);
     await manager.closeAll();
+  });
+
+  it('closes a client when startup state validation fails', async () => {
+    let client!: FakeSessionClient;
+    const manager = new PiSessionManager({
+      baseDir: 'C:\\tmp\\deep-worker-pi-start-failure-test',
+      createClient: () => {
+        client = new FakeSessionClient(true);
+        return client;
+      },
+    });
+    await expect(manager.getOrCreate({ sessionId: 's1' })).rejects.toThrow(
+      'state probe failed',
+    );
+    expect(client.closes).toBe(1);
   });
 });

@@ -95,7 +95,7 @@ async function createSession(
   return body.session.id;
 }
 
-describe('P3 domain model and API', () => {
+describe('Domain model and API', () => {
   let db: Database.Database;
   let app: AppCtx['app'];
   let adminCookie: string;

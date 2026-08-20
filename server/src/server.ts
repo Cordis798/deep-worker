@@ -63,6 +63,7 @@ export async function main(): Promise<void> {
   let handle: ServerHandle;
   try {
     handle = await startServer({ app, port: webPort(), host: hostName() });
+    app.injectWebSocket(handle.server);
   } catch (error) {
     logger.fatal(
       { err: error, port: webPort() },

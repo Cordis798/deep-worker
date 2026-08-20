@@ -31,7 +31,7 @@ interface SessionState {
 
 const sleep = (delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs));
 
-/** FIFO per session; independent sessions drain concurrently. */
+/** 每个会话使用 FIFO 队列；不同会话可以并发消费。 */
 export class SessionQueue {
   private readonly states = new Map<string, SessionState>();
   private readonly maxPendingPerSession: number;
@@ -66,7 +66,8 @@ export class SessionQueue {
   close(): void {
     this.closed = true;
     for (const state of this.states.values()) {
-      for (const job of state.pending.splice(0)) job.reject(new Error('Session queue is closed'));
+      for (const job of state.pending.splice(0))
+        job.reject(new Error('Session queue is closed'));
     }
     this.states.clear();
   }
@@ -95,10 +96,7 @@ export class SessionQueue {
                 job.reject(error);
                 break;
               }
-              const delayMs = Math.min(
-                this.maxRetryMs,
-                this.baseRetryMs * 2 ** (attempts - 1),
-              );
+              const delayMs = Math.min(this.maxRetryMs, this.baseRetryMs * 2 ** (attempts - 1));
               await this.retryDelay(delayMs);
             }
           }

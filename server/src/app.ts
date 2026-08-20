@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import { createNodeWebSocket, type NodeWebSocket } from '@hono/node-ws';
 import { Hono } from 'hono';
 import type Database from 'better-sqlite3';
 import type { AgentRunner } from '@deep-worker/pi-runner';
@@ -18,6 +19,7 @@ import { RuntimeRunnerService } from './runtime-runner-service.js';
 
 export type App = Hono<{ Variables: AppVariables }> & {
   close: () => Promise<void>;
+  injectWebSocket: NodeWebSocket['injectWebSocket'];
 };
 
 export function createApp(
@@ -36,6 +38,7 @@ export function createApp(
     });
   const runnerService = options.runnerService ?? new RuntimeRunnerService({ db, runner });
   const app = new Hono<{ Variables: AppVariables }>();
+  const nodeWebSocket = createNodeWebSocket({ app });
   app.use(async (c, next) => {
     const requestId = c.req.header('x-request-id') ?? crypto.randomUUID();
     c.set('requestId', requestId);
@@ -59,7 +62,10 @@ export function createApp(
   app.route('/api/admin', createAdminRoutes(db));
   app.route('/api/agent-profiles', createAgentProfileRoutes(db));
   app.route('/api/workspaces', createWorkspaceRoutes(db));
-  app.route('/api/workspaces', createRunnerRoutes(db, runnerService));
+  app.route(
+    '/api/workspaces',
+    createRunnerRoutes(db, runnerService, nodeWebSocket.upgradeWebSocket),
+  );
   app.route('/api/channel-accounts', createChannelAccountRoutes(db));
 
   void runnerService.resumePending().catch((error) => {
@@ -67,5 +73,6 @@ export function createApp(
   });
   return Object.assign(app, {
     close: () => runnerService.close(),
+    injectWebSocket: nodeWebSocket.injectWebSocket,
   });
 }

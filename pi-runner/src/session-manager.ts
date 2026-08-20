@@ -43,9 +43,12 @@ interface ManagedSession {
   inUse: number;
 }
 
-/** Owns one independently persisted Pi process per Runtime Session. */
+/** 为每个运行时会话管理独立且可持久化的 Pi 进程。 */
 export class PiSessionManager {
-  private readonly options: Required<Pick<PiSessionManagerOptions, 'idleTimeoutMs' | 'ensureDirectories'>> & PiSessionManagerOptions;
+  private readonly options: Required<
+    Pick<PiSessionManagerOptions, 'idleTimeoutMs' | 'ensureDirectories'>
+  > &
+    PiSessionManagerOptions;
   private readonly sessions = new Map<string, ManagedSession>();
 
   constructor(options: PiSessionManagerOptions) {
@@ -77,15 +80,22 @@ export class PiSessionManager {
       await fs.mkdir(cwd, { recursive: true });
       await fs.mkdir(sessionDir, { recursive: true });
     }
-    const client = (this.options.createClient ?? ((clientOptions) => new PiRpcClient(clientOptions)))({
+    const client = (
+      this.options.createClient ?? ((clientOptions) => new PiRpcClient(clientOptions))
+    )({
       cwd,
       sessionDir,
       sessionFile: config.sessionFile,
       env: config.env,
       tools: ['bash'],
     });
-    await client.start();
-    await client.getState();
+    try {
+      await client.start();
+      await client.getState();
+    } catch (error) {
+      await client.close().catch(() => undefined);
+      throw error;
+    }
     this.sessions.set(config.sessionId, {
       client,
       identityHash: config.identityHash,
@@ -96,7 +106,10 @@ export class PiSessionManager {
     return client;
   }
 
-  async withSession<T>(config: SessionConfig, fn: (client: SessionClient) => Promise<T>): Promise<T> {
+  async withSession<T>(
+    config: SessionConfig,
+    fn: (client: SessionClient) => Promise<T>,
+  ): Promise<T> {
     const client = await this.getOrCreate(config);
     const entry = this.sessions.get(config.sessionId)!;
     entry.inUse += 1;

@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { FakePiRunner } from '@deep-worker/pi-runner';
 import { initDatabase } from './db/migration.js';
-import { listRunnerOutbox } from './runner-reliability.js';
+import {
+  claimRunnerTurn,
+  createRunnerSubmission,
+  getRunnerTurnById,
+  listRunnerOutbox,
+} from './runner-reliability.js';
 import { RuntimeRunnerService } from './runtime-runner-service.js';
 
 let db: Database.Database;
@@ -103,6 +108,36 @@ describe('RuntimeRunnerService', () => {
       }),
     ]);
     expect(Date.now() - started).toBeLessThan(55);
+    await service.close();
+  });
+
+  it('resumes a stale turn after a service restart', async () => {
+    const submission = createRunnerSubmission(db, {
+      ownerUserId: 'u1',
+      workspaceJid: 'w1',
+      sessionId: 's1',
+      message: 'resume me',
+      idempotencyKey: 'restart-1',
+      now: new Date('2020-01-01T00:00:00.000Z'),
+    });
+    claimRunnerTurn(
+      db,
+      submission.turn.id,
+      'dead-worker',
+      1,
+      new Date('2020-01-01T00:00:00.000Z'),
+    );
+
+    const runner = new FakePiRunner({ response: 'resumed' });
+    const service = new RuntimeRunnerService({ db, runner, retryBaseMs: 0 });
+    await service.resumePending();
+
+    expect(getRunnerTurnById(db, submission.turn.id)).toMatchObject({
+      status: 'completed',
+      resultText: 'resumed',
+      attempt: 2,
+    });
+    expect(runner.calls).toHaveLength(1);
     await service.close();
   });
 });

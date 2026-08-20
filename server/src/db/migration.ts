@@ -3,8 +3,8 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 /**
- * Exported so migration tests can assert "an old database reaches head"
- * without restating the number.
+ * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
+ * 不必在测试中重复维护版本号。
  */
 export const CURRENT_SCHEMA_VERSION = 5;
 
@@ -350,9 +350,8 @@ function sqliteStringLiteral(value: string): string {
 }
 
 /**
- * Create a self-contained, consistent snapshot before upgrading an existing
- * database. VACUUM INTO reads through SQLite's transaction layer, so committed
- * WAL pages are captured. The snapshot is probed with quick_check before use.
+ * 升级已有数据库前创建自包含且一致的快照。VACUUM INTO 通过 SQLite 事务层
+ * 读取，因此能够包含已提交的 WAL 页面；快照使用前还会执行 quick_check 检查。
  */
 export function createPreMigrationBackup(
   db: Database.Database,
@@ -382,7 +381,7 @@ export function createPreMigrationBackup(
 }
 
 export interface InitDatabaseOptions {
-  /** Apply migrations only up to this version (used by migration tests). */
+  /** 只应用到指定版本，供迁移测试构造旧版本数据库。 */
   targetVersion?: number;
 }
 

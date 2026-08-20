@@ -22,7 +22,10 @@ function number(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-function base(event: RpcEvent, context: StreamEventContext): Pick<StreamEvent, 'sessionId' | 'turnId' | 'queryRunId' | 'rawType' | 'rawEvent'> {
+function base(
+  event: RpcEvent,
+  context: StreamEventContext,
+): Pick<StreamEvent, 'sessionId' | 'turnId' | 'queryRunId' | 'rawType' | 'rawEvent'> {
   return {
     sessionId: context.sessionId,
     turnId: context.turnId,
@@ -57,7 +60,7 @@ function withBase(
   return { ...base(event, context), ...value, isSynthetic: true };
 }
 
-/** Map only fields confirmed by Pi RPC evidence into the shared stream shape. */
+/** 只把 Pi RPC 证据已确认的字段映射到共享流事件结构。 */
 export function mapPiEvent(event: RpcEvent, context: StreamEventContext): StreamEvent[] {
   const mapped: StreamEvent[] = [];
   const common = base(event, context);
@@ -65,9 +68,16 @@ export function mapPiEvent(event: RpcEvent, context: StreamEventContext): Stream
     const delta = record(event.assistantMessageEvent);
     const deltaType = text(delta?.type);
     if (deltaType === 'text_delta') {
-      mapped.push(withBase(event, context, { eventType: 'text_delta', text: text(delta?.delta) ?? '' }));
+      mapped.push(
+        withBase(event, context, { eventType: 'text_delta', text: text(delta?.delta) ?? '' }),
+      );
     } else if (deltaType === 'thinking_delta') {
-      mapped.push(withBase(event, context, { eventType: 'thinking_delta', text: text(delta?.delta) ?? '' }));
+      mapped.push(
+        withBase(event, context, {
+          eventType: 'thinking_delta',
+          text: text(delta?.delta) ?? '',
+        }),
+      );
     } else if (deltaType === 'toolcall_start') {
       const args = record(delta?.args);
       mapped.push(
@@ -98,7 +108,8 @@ export function mapPiEvent(event: RpcEvent, context: StreamEventContext): Stream
       );
     }
     const eventUsage = usage(event.usage);
-    if (eventUsage) mapped.push(withBase(event, context, { eventType: 'usage', usage: eventUsage }));
+    if (eventUsage)
+      mapped.push(withBase(event, context, { eventType: 'usage', usage: eventUsage }));
     if (mapped.length > 0) return mapped;
   } else if (event.type === 'tool_execution_start') {
     mapped.push(

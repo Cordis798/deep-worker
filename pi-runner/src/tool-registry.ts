@@ -6,8 +6,10 @@ export interface ToolRegistration {
 }
 
 /**
- * Local registerTool-compatible boundary. It deliberately does not implement
- * Read/Edit/Glob/Grep semantics; a future Pi extension can consume this list.
+ * 本地 registerTool 兼容边界。
+ *
+ * 这里只登记工具描述，不实现 Read/Edit/Glob/Grep 的完整语义，后续 Pi 扩展
+ * 可以消费这份登记结果。
  */
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolRegistration>();

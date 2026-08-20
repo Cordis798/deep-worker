@@ -33,7 +33,7 @@ function roleLabel(role: string): string {
   return 'User';
 }
 
-/** Build one deterministic prompt envelope for a Pi user turn. */
+/** 为一次 Pi 用户回合组装结构稳定、可复现的提示词内容。 */
 export function assemblePrompt(input: PromptInput): string {
   const sections: string[] = [];
   if (input.systemPrompt?.trim()) {

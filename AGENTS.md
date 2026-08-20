@@ -36,6 +36,10 @@ git diff --check
 
 并对照阶段 Spec 逐条验收后汇报，等待人工确认再进入下一阶段。
 
+## 提交说明约定
+
+- Git 提交说明保留 Conventional Commit 前缀，冒号后的描述和提交正文统一使用中文。
+
 ## 禁止事项
 
 - 不得修改参考仓库 `C:/Users/Administrator/Desktop/deep-worker-main/` 中的任何文件。

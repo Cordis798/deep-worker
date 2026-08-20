@@ -17,9 +17,15 @@ export interface RpcProcessLike {
   signalCode: NodeJS.Signals | null;
   kill(signal?: NodeJS.Signals): boolean;
   on(event: 'error', listener: (error: Error) => void): this;
-  on(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  on(
+    event: 'exit',
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): this;
   once(event: 'error', listener: (error: Error) => void): this;
-  once(event: 'exit', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this;
+  once(
+    event: 'exit',
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): this;
 }
 
 export type RpcSpawnProcess = (
@@ -73,7 +79,10 @@ function asError(error: unknown): Error {
 }
 
 export class PiRpcClient {
-  private readonly options: Required<Pick<PiRpcClientOptions, 'requestTimeoutMs' | 'startupTimeoutMs' | 'killTimeoutMs'>> & PiRpcClientOptions;
+  private readonly options: Required<
+    Pick<PiRpcClientOptions, 'requestTimeoutMs' | 'startupTimeoutMs' | 'killTimeoutMs'>
+  > &
+    PiRpcClientOptions;
   private readonly spawnProcess: RpcSpawnProcess;
   private process: RpcProcessLike | null = null;
   private decoder = new JsonlDecoder();
@@ -151,7 +160,7 @@ export class PiRpcClient {
       try {
         child.stdin.end();
       } catch {
-        // The process may already have closed its stdin.
+        // 进程可能已经关闭标准输入。
       }
       try {
         child.kill('SIGTERM');
@@ -163,7 +172,7 @@ export class PiRpcClient {
           try {
             child.kill('SIGKILL');
           } catch {
-            // Nothing else to clean up.
+            // 没有其他需要清理的资源。
           }
           finish();
         }
@@ -187,11 +196,17 @@ export class PiRpcClient {
     return this.stderrTail;
   }
 
-  async prompt(message: string, options: Pick<PromptAndWaitOptions, 'streamingBehavior'> = {}): Promise<void> {
+  async prompt(
+    message: string,
+    options: Pick<PromptAndWaitOptions, 'streamingBehavior'> = {},
+  ): Promise<void> {
     await this.send({ type: 'prompt', message, streamingBehavior: options.streamingBehavior });
   }
 
-  async promptAndWait(message: string, options: PromptAndWaitOptions = {}): Promise<RpcEvent[]> {
+  async promptAndWait(
+    message: string,
+    options: PromptAndWaitOptions = {},
+  ): Promise<RpcEvent[]> {
     const events: RpcEvent[] = [];
     let unsubscribe: () => void = () => undefined;
     const settled = new Promise<void>((resolve, reject) => {
@@ -257,7 +272,8 @@ export class PiRpcClient {
 
   private async send(command: RpcCommandBody): Promise<RpcResponse> {
     const child = this.process;
-    if (!child || !child.stdin.writable) throw this.processError ?? new Error('Pi RPC client is not started');
+    if (!child || !child.stdin.writable)
+      throw this.processError ?? new Error('Pi RPC client is not started');
     if (this.processError) throw this.processError;
     const id = `req_${++this.requestCounter}`;
     const fullCommand = { ...command, id };
@@ -317,7 +333,9 @@ export class PiRpcClient {
   }
 
   private exitError(code: number | null, signal: NodeJS.Signals | null): Error {
-    return new Error(`Pi RPC process exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`);
+    return new Error(
+      `Pi RPC process exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`,
+    );
   }
 
   private rejectPending(error: Error): void {
@@ -333,4 +351,10 @@ export class PiRpcClient {
   }
 }
 
-export type { RpcBashResult, RpcCommand, RpcEvent, RpcResponse, RpcSessionState } from './rpc-types.js';
+export type {
+  RpcBashResult,
+  RpcCommand,
+  RpcEvent,
+  RpcResponse,
+  RpcSessionState,
+} from './rpc-types.js';

@@ -1,8 +1,7 @@
 /**
- * The small, runtime-neutral stream protocol used by P4.
+ * 运行时无关的轻量流式事件协议。
  *
- * Pi-specific fields stay in rawEvent. The fields below are the stable
- * projection consumed by server/web integrations.
+ * Pi 专用字段保留在 rawEvent 中，下面的字段是 server 与 web 稳定消费的投影。
  */
 export type StreamEventType =
   | 'text_delta'

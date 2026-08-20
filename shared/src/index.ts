@@ -1,8 +1,7 @@
 /**
- * Shared types across server, web and pi-runner.
+ * server、web 与 pi-runner 共用的类型定义。
  *
- * P1 only stages this package. The stream event protocol shared by all three
- * sub-projects lands with the Pi Runner core loop in P4.
+ * 三个子项目通过这里共享流式事件协议，避免各自维护不一致的数据结构。
  */
 export const SHARED_PACKAGE_VERSION = '0.1.0';
 

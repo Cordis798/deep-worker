@@ -42,13 +42,14 @@ export interface PiRunnerOptions {
   sessionManager?: PiSessionManager;
 }
 
-/** Pi-backed AgentRunner with per-session serialization and bounded retries. */
+/** 基于 Pi 的智能体运行器，按会话串行执行并限制重试次数。 */
 export class PiRunner implements AgentRunner {
   private readonly sessions: PiSessionManager;
   private readonly queue: SessionQueue;
 
   constructor(options: PiRunnerOptions) {
-    this.sessions = options.sessionManager ?? new PiSessionManager({ baseDir: options.baseDir });
+    this.sessions =
+      options.sessionManager ?? new PiSessionManager({ baseDir: options.baseDir });
     this.queue = new SessionQueue(options.queueOptions);
   }
 
@@ -91,19 +92,19 @@ export class PiRunner implements AgentRunner {
           throw new Error('Pi session client does not support promptAndWait');
         }
         const completedEvents = await client.promptAndWait(prompt, {
-            timeoutMs: request.timeoutMs,
-            onEvent: (rawEvent) => {
-              rawEvents.push(rawEvent);
-              for (const event of mapPiEvent(rawEvent, {
-                sessionId: request.sessionId,
-                turnId: request.turnId,
-                queryRunId: request.queryRunId,
-              })) {
-                events.push(event);
-                onEvent?.(event);
-              }
-            },
-          });
+          timeoutMs: request.timeoutMs,
+          onEvent: (rawEvent) => {
+            rawEvents.push(rawEvent);
+            for (const event of mapPiEvent(rawEvent, {
+              sessionId: request.sessionId,
+              turnId: request.turnId,
+              queryRunId: request.queryRunId,
+            })) {
+              events.push(event);
+              onEvent?.(event);
+            }
+          },
+        });
         if (rawEvents.length === 0) rawEvents.push(...completedEvents);
         reply = extractFinalReply(rawEvents);
         if (!reply && client.getLastAssistantText) {
@@ -125,10 +126,13 @@ export interface FakePiRunnerOptions {
   emitBash?: boolean;
 }
 
-/** Deterministic runner for tests and local development; no API key required. */
+/** 用于测试和本地开发的确定性运行器，不需要接口密钥。 */
 export class FakePiRunner implements AgentRunner {
   readonly calls: AgentRunRequest[] = [];
-  private readonly options: Required<Pick<FakePiRunnerOptions, 'delayMs' | 'failuresBeforeSuccess'>> & FakePiRunnerOptions;
+  private readonly options: Required<
+    Pick<FakePiRunnerOptions, 'delayMs' | 'failuresBeforeSuccess'>
+  > &
+    FakePiRunnerOptions;
   private failures = 0;
 
   constructor(options: FakePiRunnerOptions = {}) {
@@ -137,14 +141,16 @@ export class FakePiRunner implements AgentRunner {
 
   async run(request: AgentRunRequest, onEvent?: AgentEventListener): Promise<AgentRunResult> {
     this.calls.push(request);
-    if (this.options.delayMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, this.options.delayMs));
+    if (this.options.delayMs > 0)
+      await new Promise<void>((resolve) => setTimeout(resolve, this.options.delayMs));
     if (this.failures < this.options.failuresBeforeSuccess) {
       this.failures += 1;
       throw new Error('fake temporary failure');
     }
-    const reply = typeof this.options.response === 'function'
-      ? this.options.response(request)
-      : this.options.response ?? `Fake reply: ${request.message}`;
+    const reply =
+      typeof this.options.response === 'function'
+        ? this.options.response(request)
+        : (this.options.response ?? `Fake reply: ${request.message}`);
     const events: StreamEvent[] = [
       {
         eventType: 'init',
@@ -200,6 +206,6 @@ export class FakePiRunner implements AgentRunner {
   }
 
   async close(): Promise<void> {
-    // Fake runner has no process resources.
+    // 模拟运行器不持有进程资源。
   }
 }
