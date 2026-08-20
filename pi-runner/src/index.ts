@@ -10,3 +10,4 @@ export * from './session-manager.js';
 export * from './session-queue.js';
 export * from './stream-events.js';
 export * from './tool-registry.js';
+export * from './capability-injection.js';

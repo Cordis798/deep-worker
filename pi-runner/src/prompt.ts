@@ -8,6 +8,7 @@ export interface PromptInput {
   history?: PromptMessage[];
   currentMessage: string;
   outputContract?: string;
+  capabilities?: { hash: string; skills: string[]; mcpServers: string[]; plugins: string[] };
 }
 
 function contentToText(content: unknown): string {
@@ -49,6 +50,11 @@ export function assemblePrompt(input: PromptInput): string {
   sections.push(`[Current user message]\n${input.currentMessage}`);
   if (input.outputContract?.trim()) {
     sections.push(`[Output contract]\n${input.outputContract.trim()}`);
+  }
+  if (input.capabilities) {
+    sections.push(
+      `[Pi capabilities]\nSkills: ${input.capabilities.skills.join(', ') || 'none'}\nMCP servers: ${input.capabilities.mcpServers.join(', ') || 'none'}\nPlugins: ${input.capabilities.plugins.join(', ') || 'none'}\nCapability hash: ${input.capabilities.hash}`,
+    );
   }
   return sections.join('\n\n');
 }

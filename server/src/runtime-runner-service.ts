@@ -34,6 +34,7 @@ export interface RuntimeRunnerMessageInput {
   systemPrompt?: string;
   outputContract?: string;
   timeoutMs?: number;
+  capabilities?: AgentRunRequest['capabilities'];
 }
 
 export interface RuntimeRunnerResult {
@@ -131,6 +132,7 @@ export class RuntimeRunnerService {
         systemPrompt: input.systemPrompt,
         outputContract: input.outputContract,
         timeoutMs: input.timeoutMs,
+        capabilities: input.capabilities,
       }),
     );
     return result.value;
@@ -153,7 +155,7 @@ export class RuntimeRunnerService {
 
   private async processTurn(
     turnId: string,
-    options: { systemPrompt?: string; outputContract?: string; timeoutMs?: number },
+    options: { systemPrompt?: string; outputContract?: string; timeoutMs?: number; capabilities?: AgentRunRequest['capabilities'] },
   ): Promise<RuntimeRunnerResult> {
     const first = getRunnerTurnById(this.db, turnId);
     if (!first) throw new Error('Runner turn not found');
@@ -191,6 +193,8 @@ export class RuntimeRunnerService {
           turnId,
           queryRunId: turnId,
           identityHash: profile?.identity_hash,
+          capabilities: options.capabilities,
+          capabilityHash: options.capabilities?.hash,
         };
         const result = await this.runner.run(request, (event) => {
           events.push(event);

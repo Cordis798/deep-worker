@@ -3,6 +3,7 @@ import path from 'node:path';
 import { PiRpcClient, type PiRpcClientOptions } from './rpc-client.js';
 import type { PromptAndWaitOptions } from './rpc-client.js';
 import type { RpcEvent } from './rpc-types.js';
+import { materializePiCapabilities, type PiCapabilityInjection } from './capability-injection.js';
 
 export interface SessionStateLike {
   sessionId: string;
@@ -26,6 +27,7 @@ export interface SessionConfig {
   identityHash?: string;
   capabilityHash?: string;
   env?: NodeJS.ProcessEnv;
+  capabilities?: PiCapabilityInjection;
 }
 
 export interface PiSessionManagerOptions {
@@ -60,11 +62,12 @@ export class PiSessionManager {
   }
 
   async getOrCreate(config: SessionConfig): Promise<SessionClient> {
+    const requestedCapabilityHash = config.capabilityHash ?? config.capabilities?.hash;
     const existing = this.sessions.get(config.sessionId);
     if (
       existing &&
       existing.identityHash === config.identityHash &&
-      existing.capabilityHash === config.capabilityHash
+      existing.capabilityHash === requestedCapabilityHash
     ) {
       existing.lastUsedAt = Date.now();
       return existing.client;
@@ -80,13 +83,24 @@ export class PiSessionManager {
       await fs.mkdir(cwd, { recursive: true });
       await fs.mkdir(sessionDir, { recursive: true });
     }
+    const capabilityFiles = config.capabilities
+      ? materializePiCapabilities(config.capabilities, sessionRoot)
+      : undefined;
     const client = (
       this.options.createClient ?? ((clientOptions) => new PiRpcClient(clientOptions))
     )({
       cwd,
       sessionDir,
       sessionFile: config.sessionFile,
-      env: config.env,
+      env: {
+        ...config.env,
+        ...(capabilityFiles
+          ? {
+              PI_RUNNER_SETTINGS_FILE: capabilityFiles.settingsPath,
+              PI_RUNNER_SKILLS_DIR: capabilityFiles.skillsDir,
+            }
+          : {}),
+      },
       tools: ['bash'],
     });
     try {
@@ -99,7 +113,7 @@ export class PiSessionManager {
     this.sessions.set(config.sessionId, {
       client,
       identityHash: config.identityHash,
-      capabilityHash: config.capabilityHash,
+      capabilityHash: requestedCapabilityHash,
       lastUsedAt: Date.now(),
       inUse: 0,
     });

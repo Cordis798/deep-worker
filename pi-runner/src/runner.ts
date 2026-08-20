@@ -5,6 +5,7 @@ import { assemblePrompt, type PromptMessage } from './prompt.js';
 import { SessionQueue, type SessionQueueOptions } from './session-queue.js';
 import { mapPiEvent } from './stream-events.js';
 import type { RpcEvent } from './rpc-types.js';
+import type { PiCapabilityInjection } from './capability-injection.js';
 
 export interface AgentRunRequest {
   sessionId: string;
@@ -20,6 +21,7 @@ export interface AgentRunRequest {
   turnId?: string;
   queryRunId?: string;
   timeoutMs?: number;
+  capabilities?: PiCapabilityInjection;
 }
 
 export interface AgentRunResult {
@@ -76,12 +78,21 @@ export class PiRunner implements AgentRunner {
       sessionFile: request.sessionFile,
       identityHash: request.identityHash,
       capabilityHash: request.capabilityHash,
+      capabilities: request.capabilities,
     };
     const prompt = assemblePrompt({
       systemPrompt: request.systemPrompt,
       history: request.history,
       currentMessage: request.message,
       outputContract: request.outputContract ?? 'Return the final answer only.',
+      capabilities: request.capabilities
+        ? {
+            hash: request.capabilities.hash,
+            skills: request.capabilities.skills.map((skill) => skill.name),
+            mcpServers: request.capabilities.mcpServers.map((server) => server.name),
+            plugins: request.capabilities.plugins.filter((plugin) => plugin.enabled).map((plugin) => plugin.name),
+          }
+        : undefined,
     });
     const rawEvents: RpcEvent[] = [];
     const events: StreamEvent[] = [];

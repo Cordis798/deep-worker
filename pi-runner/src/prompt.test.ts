@@ -24,4 +24,14 @@ describe('prompt assembly', () => {
       '[Current user message]\nhello',
     );
   });
+
+  it('把能力摘要和 hash 注入提示词，不注入路径或凭据', () => {
+    const result = assemblePrompt({
+      currentMessage: 'hello',
+      capabilities: { hash: 'abc', skills: ['bash'], mcpServers: ['demo'], plugins: [] },
+    });
+    expect(result).toContain('[Pi capabilities]');
+    expect(result).toContain('Skills: bash');
+    expect(result).toContain('Capability hash: abc');
+  });
 });

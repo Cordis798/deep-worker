@@ -66,6 +66,22 @@ describe('RuntimeRunnerService', () => {
     await service.close();
   });
 
+  it('把已解析的能力清单传递给 Pi Runner', async () => {
+    const runner = new FakePiRunner({ response: 'capability reply' });
+    const service = new RuntimeRunnerService({ db, runner, retryBaseMs: 0 });
+    await service.submit({
+      ownerUserId: 'u1',
+      workspaceJid: 'w1',
+      sessionId: 's1',
+      message: 'use capabilities',
+      idempotencyKey: 'capability-message',
+      capabilities: { hash: 'cap-hash', skills: [], mcpServers: [], plugins: [] },
+    });
+    expect(runner.calls[0].capabilityHash).toBe('cap-hash');
+    expect(runner.calls[0].capabilities?.hash).toBe('cap-hash');
+    await service.close();
+  });
+
   it('retries a failed runner and preserves the final durable state', async () => {
     const runner = new FakePiRunner({ response: 'recovered', failuresBeforeSuccess: 2 });
     const service = new RuntimeRunnerService({
