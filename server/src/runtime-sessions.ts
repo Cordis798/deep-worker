@@ -55,7 +55,7 @@ export function createRuntimeSession(
   ownerUserId: string,
   workspaceJid: string,
   fields: { name?: string; agent_profile_id?: string | null },
-): { ok: boolean; reason?: 'workspace_not_found' | 'invalid_profile' } {
+): { ok: boolean; id?: string; reason?: 'workspace_not_found' | 'invalid_profile' } {
   const ws = getOwnedWorkspace(db, ownerUserId, workspaceJid);
   if (!ws) return { ok: false, reason: 'workspace_not_found' };
   if (fields.agent_profile_id) {
@@ -77,7 +77,7 @@ export function createRuntimeSession(
     now,
     now,
   );
-  return { ok: true };
+  return { ok: true, id };
 }
 
 export function updateRuntimeSession(
