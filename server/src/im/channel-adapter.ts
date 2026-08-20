@@ -145,9 +145,18 @@ export function createChannelAdapter(options: {
       return () => listeners.delete(listener);
     },
     sendMessage: async (chatJid, text) => options.transport.sendMessage(toTarget(chatJid), text),
-    sendFile: async (chatJid, filePath, fileName) => options.transport.sendFile(toTarget(chatJid), filePath, fileName),
-    sendImage: async (chatJid, data, mimeType, caption, fileName) => options.transport.sendImage(toTarget(chatJid), data, mimeType, caption, fileName),
-    react: async (chatJid, reaction) => options.transport.react(toTarget(chatJid), reaction),
+    sendFile: async (chatJid, filePath, fileName) => {
+      if (!options.capabilities.supportsFileSend) throw new Error('当前渠道不支持文件投递');
+      return options.transport.sendFile(toTarget(chatJid), filePath, fileName);
+    },
+    sendImage: async (chatJid, data, mimeType, caption, fileName) => {
+      if (!options.capabilities.supportsImageSend) throw new Error('当前渠道不支持图片投递');
+      return options.transport.sendImage(toTarget(chatJid), data, mimeType, caption, fileName);
+    },
+    react: async (chatJid, reaction) => {
+      if (!options.capabilities.supportsReaction) throw new Error('当前渠道不支持 Reaction');
+      return options.transport.react(toTarget(chatJid), reaction);
+    },
     sendStreamingUpdate: async (chatJid, text, streamId, final) => {
       if (!options.capabilities.supportsStreamingUpdates) throw new Error('当前渠道不支持流式更新');
       return options.transport.sendStreamingUpdate(toTarget(chatJid), text, streamId, final);

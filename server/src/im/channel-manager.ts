@@ -65,8 +65,10 @@ export class ChannelManager {
     this.adapters.set(accountId, { ownerUserId, adapter, unsubscribe });
     try {
       await adapter.connect({ accountId, credentials: getChannelAccountCredentials(this.db, ownerUserId, accountId) ?? {} });
+      this.updateAccountStatus(ownerUserId, accountId, adapter.getStatus().status);
       await this.flushPending();
     } catch (error) {
+      this.updateAccountStatus(ownerUserId, accountId, 'error');
       unsubscribe();
       this.adapters.delete(accountId);
       throw error;
@@ -80,6 +82,7 @@ export class ChannelManager {
       return;
     }
     await current.adapter.reconnect();
+    this.updateAccountStatus(ownerUserId, accountId, current.adapter.getStatus().status);
     await this.flushPending();
   }
 
@@ -89,15 +92,31 @@ export class ChannelManager {
     current.unsubscribe();
     this.adapters.delete(accountId);
     await current.adapter.disconnect();
+    this.updateAccountStatus(current.ownerUserId, accountId, 'disconnected');
   }
 
   async sendMessage(ownerUserId: string, chatJid: string, text: string, sourceMessageId?: string): Promise<void> {
+    await this.enqueueAndFlush(ownerUserId, chatJid, 'message', { text }, sourceMessageId);
+  }
+
+  async sendFile(ownerUserId: string, chatJid: string, filePath: string, fileName: string, sourceMessageId?: string): Promise<void> {
+    await this.enqueueAndFlush(ownerUserId, chatJid, 'file', { filePath, fileName }, sourceMessageId);
+  }
+
+  async sendImage(ownerUserId: string, chatJid: string, data: Uint8Array, mimeType: string, caption?: string, fileName?: string, sourceMessageId?: string): Promise<void> {
+    await this.enqueueAndFlush(ownerUserId, chatJid, 'image', { dataBase64: Buffer.from(data).toString('base64'), mimeType, ...(caption ? { caption } : {}), ...(fileName ? { fileName } : {}) }, sourceMessageId);
+  }
+
+  async react(ownerUserId: string, chatJid: string, reaction: string, sourceMessageId?: string): Promise<void> {
+    await this.enqueueAndFlush(ownerUserId, chatJid, 'reaction', { reaction }, sourceMessageId);
+  }
+
+  async sendStreamingUpdate(ownerUserId: string, chatJid: string, text: string, streamId: string, final: boolean): Promise<void> {
     const address = parseChannelJid(chatJid);
     if (!address?.channelAccountId) throw new Error('渠道回复地址缺少账号身份');
-    const account = getOwnedChannelAccount(this.db, ownerUserId, address.channelAccountId);
-    if (!account || account.provider !== address.provider) throw new Error('渠道回复账号不存在');
-    enqueueChannelDelivery(this.db, { ownerUserId, provider: address.provider, channelAccountId: address.channelAccountId, chatJid, sourceMessageId, kind: 'message', payload: { text } });
-    await this.flushPending();
+    const connection = this.adapters.get(address.channelAccountId);
+    if (!connection || connection.ownerUserId !== ownerUserId) throw new Error('渠道账号尚未连接');
+    await connection.adapter.sendStreamingUpdate(chatJid, text, streamId, final);
   }
 
   async flushPending(): Promise<void> {
@@ -144,6 +163,19 @@ export class ChannelManager {
     }
     const reply = this.onAgentMessage ? await this.onAgentMessage({ ownerUserId, message, route: resolved.route }) : null;
     if (reply) await this.sendMessage(ownerUserId, message.chatJid, reply, message.messageId);
+  }
+
+  private async enqueueAndFlush(ownerUserId: string, chatJid: string, kind: 'message' | 'file' | 'image' | 'reaction', payload: Parameters<typeof enqueueChannelDelivery>[1]['payload'], sourceMessageId?: string): Promise<void> {
+    const address = parseChannelJid(chatJid);
+    if (!address?.channelAccountId) throw new Error('渠道回复地址缺少账号身份');
+    const account = getOwnedChannelAccount(this.db, ownerUserId, address.channelAccountId);
+    if (!account || account.provider !== address.provider) throw new Error('渠道回复账号不存在');
+    enqueueChannelDelivery(this.db, { ownerUserId, provider: address.provider, channelAccountId: address.channelAccountId, chatJid, sourceMessageId, kind, payload });
+    await this.flushPending();
+  }
+
+  private updateAccountStatus(ownerUserId: string, accountId: string, status: string): void {
+    this.db.prepare('UPDATE channel_accounts SET status = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?').run(status, new Date().toISOString(), accountId, ownerUserId);
   }
 
   private async deliver(row: ChannelOutboxRow, adapter: ReturnType<ChannelAdapterRegistry['create']>): Promise<void> {

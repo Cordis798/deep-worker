@@ -189,7 +189,7 @@ export function getChannelAccountCredentials(
   id: string,
 ): Record<string, unknown> | undefined {
   const row = getOwnedChannelAccount(db, ownerUserId, id);
-  if (!row?.secret_ref) return undefined;
+  if (!row?.secret_ref || !row.secret_ref.startsWith('v1.')) return undefined;
   return decryptChannelCredentials(row.secret_ref);
 }
 
@@ -229,7 +229,7 @@ export function toChannelAccountPublic(row: ChannelAccountRow) {
     is_default: row.is_default === 1,
     default_workspace_jid: row.default_workspace_jid,
     status: row.status,
-    has_secret: !!row.secret_ref,
+    has_secret: row.secret_ref.startsWith('v1.'),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };

@@ -34,6 +34,7 @@ describe('渠道管理器消息闭环', () => {
       retryBaseMs: 0,
     });
     await manager.connectAccount(ownerUserId, accountId);
+    expect((getOwnedChannelAccount(db, ownerUserId, accountId)!).status).toBe('connected');
     transport.emitMessage({ externalChatId: 'chat-1', conversation: 'private', senderId: 'user-1', text: '你好' });
     await manager.waitForIdle();
     expect(replies).toEqual(['你好']);
@@ -43,7 +44,14 @@ describe('渠道管理器消息闭环', () => {
     transport.emitMessage({ externalChatId: 'chat-1', conversation: 'private', senderId: 'user-1', text: '再次发送' });
     await manager.waitForIdle();
     expect(replies).toEqual(['你好', '再次发送']);
+    if (provider !== 'wechat') {
+      await manager.sendFile(ownerUserId, `${provider}:100#account:${accountId}`, 'report.txt', '报告');
+      await manager.sendImage(ownerUserId, `${provider}:100#account:${accountId}`, new Uint8Array([1]), 'image/png', '截图');
+      await manager.react(ownerUserId, `${provider}:100#account:${accountId}`, '👍');
+      expect(transport.sent.map((item) => item.kind)).toEqual(['message', 'message', 'file', 'image', 'reaction']);
+    }
     await manager.close();
+    expect((getOwnedChannelAccount(db, ownerUserId, accountId)!).status).toBe('disconnected');
   });
 
   it('投递失败后保存原地址，重试成功时不切换默认账号', async () => {

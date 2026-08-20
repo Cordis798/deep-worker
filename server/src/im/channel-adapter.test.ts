@@ -42,10 +42,17 @@ describe('统一渠道适配器', () => {
 
     const target = received[0]!.chatJid;
     await adapter.sendMessage(target, '回复');
-    await adapter.sendFile(target, 'report.txt', '报告');
-    await adapter.sendImage(target, new Uint8Array([1, 2]), 'image/png', '截图');
-    await adapter.react(target, '👍');
-    expect(transport.sent.map((item) => item.kind)).toEqual(['message', 'file', 'image', 'reaction']);
+    if (CHANNEL_CAPABILITIES[provider].supportsFileSend) {
+      await adapter.sendFile(target, 'report.txt', '报告');
+      await adapter.sendImage(target, new Uint8Array([1, 2]), 'image/png', '截图');
+      await adapter.react(target, '👍');
+      expect(transport.sent.map((item) => item.kind)).toEqual(['message', 'file', 'image', 'reaction']);
+    } else {
+      await expect(adapter.sendFile(target, 'report.txt', '报告')).rejects.toThrow('不支持');
+      await expect(adapter.sendImage(target, new Uint8Array([1, 2]), 'image/png', '截图')).rejects.toThrow('不支持');
+      await expect(adapter.react(target, '👍')).rejects.toThrow('不支持');
+      expect(transport.sent.map((item) => item.kind)).toEqual(['message']);
+    }
 
     transport.dropConnection(new Error('网络断开'));
     expect(adapter.getStatus().status).toBe('disconnected');
