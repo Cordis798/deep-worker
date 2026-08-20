@@ -45,6 +45,30 @@ async function createWorkspaceAndSession(
 }
 
 describe('Runner WebSocket forwarding', () => {
+  it('creates an asynchronous turn before streaming events', async () => {
+    const db = initDatabase(':memory:');
+    const runner = new FakePiRunner({ response: 'async reply', delayMs: 10 });
+    const service = new RuntimeRunnerService({ db, runner, retryBaseMs: 0 });
+    const app = createApp({ db, runnerService: service });
+    const { cookie } = await setupAdmin(app);
+    const { jid, sessionId } = await createWorkspaceAndSession(app, cookie);
+    const response = await app.request(
+      `/api/workspaces/${jid}/runtime-sessions/${sessionId}/messages/stream`,
+      jsonRequest(
+        `/api/workspaces/${jid}/runtime-sessions/${sessionId}/messages/stream`,
+        { message: 'stream asynchronously', idempotency_key: 'async-message-1' },
+        cookie,
+      ),
+    );
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as {
+      turn: { id: string; status: string };
+    };
+    expect(body.turn.id).toMatch(/^turn_/);
+    expect(['queued', 'running']).toContain(body.turn.status);
+    await app.close();
+  });
+
   it('forwards Fake Pi StreamEvents to an authenticated socket', async () => {
     const db = initDatabase(':memory:');
     const runner = new FakePiRunner({ response: 'socket reply', delayMs: 5, emitBash: true });

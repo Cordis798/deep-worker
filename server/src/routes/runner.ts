@@ -6,6 +6,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { formatZodError, createRunnerMessageSchema } from '../schemas.js';
 import { getOwnedRuntimeSession } from '../runtime-sessions.js';
 import {
+  createRunnerSubmission,
   getRunnerTurnById,
   listRunnerOutbox,
   toRunnerTurnPublic,
@@ -20,6 +21,52 @@ export function createRunnerRoutes(
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   app.use('*', authMiddleware(db));
+
+  app.post('/:jid/runtime-sessions/:sessionId/messages/stream', async (c) => {
+    const user = c.get('user')!;
+    const jid = c.req.param('jid');
+    const sessionId = c.req.param('sessionId');
+    const session = getOwnedRuntimeSession(db, user.id, jid, sessionId);
+    if (!session || session.status !== 'active') {
+      return c.json({ error: 'Runtime session not found' }, 404);
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = createRunnerMessageSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: formatZodError(parsed.error) }, 400);
+    const idempotencyKey = parsed.data.idempotency_key ?? `${user.id}:${crypto.randomUUID()}`;
+    try {
+      const submission = createRunnerSubmission(db, {
+        ownerUserId: user.id,
+        workspaceJid: jid,
+        sessionId,
+        message: parsed.data.message,
+        idempotencyKey,
+      });
+      if (
+        submission.inbox.ownerUserId !== user.id ||
+        submission.inbox.workspaceJid !== jid ||
+        submission.inbox.sessionId !== sessionId
+      ) {
+        return c.json({ error: 'Idempotency key belongs to another runtime session' }, 409);
+      }
+      void service
+        .submit({
+          ownerUserId: user.id,
+          workspaceJid: jid,
+          sessionId,
+          message: parsed.data.message,
+          idempotencyKey,
+          systemPrompt: parsed.data.system_prompt,
+          outputContract: parsed.data.output_contract,
+        })
+        .catch(() => undefined);
+      return c.json({ turn: toRunnerTurnPublic(submission.turn) }, 202);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/idempotency key/i.test(message)) return c.json({ error: message }, 409);
+      return c.json({ error: message }, 500);
+    }
+  });
 
   app.post('/:jid/runtime-sessions/:sessionId/messages', async (c) => {
     const user = c.get('user')!;
