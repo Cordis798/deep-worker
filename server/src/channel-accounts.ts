@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
+import { decryptChannelCredentials, encryptChannelCredentials } from './channel-secrets.js';
 import { getOwnedWorkspace } from './workspaces.js';
 
 export type Db = Database.Database;
@@ -74,7 +75,7 @@ export function createChannelAccount(
   fields: {
     provider: string;
     name: string;
-    secret_ref?: string;
+    credentials?: Record<string, unknown>;
     is_default?: boolean;
     default_workspace_jid?: string | null;
   },
@@ -113,7 +114,7 @@ export function createChannelAccount(
       ownerUserId,
       fields.provider,
       fields.name,
-      fields.secret_ref ?? `secret:${id}`,
+      fields.credentials ? encryptChannelCredentials(fields.credentials) : '',
       1,
       isDefault ? 1 : 0,
       fields.default_workspace_jid ?? null,
@@ -134,6 +135,7 @@ export function updateChannelAccount(
     enabled?: boolean;
     is_default?: boolean;
     default_workspace_jid?: string | null;
+    credentials?: Record<string, unknown>;
   },
 ): { ok: boolean; reason?: 'not_found' | 'invalid_workspace' } {
   const row = getOwnedChannelAccount(db, ownerUserId, id);
@@ -168,6 +170,10 @@ export function updateChannelAccount(
       sets.push('default_workspace_jid = ?');
       params.push(fields.default_workspace_jid);
     }
+    if (fields.credentials !== undefined) {
+      sets.push('secret_ref = ?');
+      params.push(encryptChannelCredentials(fields.credentials));
+    }
     if (sets.length === 0) return;
     params.push(new Date().toISOString(), id, ownerUserId);
     db.prepare(
@@ -175,6 +181,16 @@ export function updateChannelAccount(
     ).run(...params);
   })();
   return { ok: true };
+}
+
+export function getChannelAccountCredentials(
+  db: Db,
+  ownerUserId: string,
+  id: string,
+): Record<string, unknown> | undefined {
+  const row = getOwnedChannelAccount(db, ownerUserId, id);
+  if (!row?.secret_ref) return undefined;
+  return decryptChannelCredentials(row.secret_ref);
 }
 
 export function deleteChannelAccount(

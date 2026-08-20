@@ -57,6 +57,7 @@ export const updateRuntimeSessionSchema = z
 export const createChannelAccountSchema = z.object({
   provider: z.enum(['feishu', 'telegram', 'qq', 'dingtalk', 'wechat', 'discord', 'whatsapp']),
   name: nonEmptyString('账号名', 80),
+  credentials: z.record(z.string(), z.unknown()).optional(),
   is_default: z.boolean().optional(),
   default_workspace_jid: z.string().optional().nullable(),
 });
@@ -66,6 +67,7 @@ export const updateChannelAccountSchema = z
     name: nonEmptyString('账号名', 80).optional(),
     enabled: z.boolean().optional(),
     is_default: z.boolean().optional(),
+    credentials: z.record(z.string(), z.unknown()).optional(),
     default_workspace_jid: z.string().optional().nullable(),
   })
   .refine((v) => Object.keys(v).length > 0, {

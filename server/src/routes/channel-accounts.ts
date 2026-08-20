@@ -39,6 +39,7 @@ export function createChannelAccountRoutes(db: Db) {
     const result = createChannelAccount(db, user.id, {
       provider: parsed.data.provider,
       name: parsed.data.name,
+      credentials: parsed.data.credentials,
       is_default: parsed.data.is_default,
       default_workspace_jid: parsed.data.default_workspace_jid,
     });
