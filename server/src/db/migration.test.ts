@@ -98,6 +98,11 @@ describe('sqlite migration framework', () => {
         .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runner_outbox'")
         .get(),
     ).toBeTruthy();
+    for (const table of ['skills', 'mcp_servers', 'plugins_catalog', 'agent_builder_drafts']) {
+      expect(
+        db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),
+      ).toBeTruthy();
+    }
     db.close();
   });
 

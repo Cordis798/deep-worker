@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 export class MigrationError extends Error {}
 
@@ -341,6 +341,87 @@ function createChannelReliabilityTables(db: Database.Database): void {
   `);
 }
 
+function createCapabilityTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS skills (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT,
+      scope TEXT NOT NULL,
+      project_key TEXT,
+      name TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_ref TEXT NOT NULL,
+      version TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      install_path TEXT NOT NULL,
+      manifest_json TEXT NOT NULL,
+      dependencies_json TEXT NOT NULL DEFAULT '[]',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_skills_scope_owner
+      ON skills(scope, owner_user_id, project_key, name);
+
+    CREATE TABLE IF NOT EXISTS mcp_servers (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      transport TEXT NOT NULL,
+      config_encrypted TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'unknown',
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(owner_user_id, name),
+      FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_mcp_servers_owner_status
+      ON mcp_servers(owner_user_id, enabled, status);
+
+    CREATE TABLE IF NOT EXISTS plugins_catalog (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT,
+      name TEXT NOT NULL,
+      version TEXT NOT NULL,
+      source TEXT NOT NULL,
+      manifest_json TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(owner_user_id, name),
+      FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_plugins_catalog_owner_enabled
+      ON plugins_catalog(owner_user_id, enabled, name);
+
+    CREATE TABLE IF NOT EXISTS agent_builder_drafts (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      workspace_jid TEXT,
+      target_agent_profile_id TEXT,
+      title TEXT NOT NULL,
+      transcript_json TEXT NOT NULL DEFAULT '[]',
+      definition_json TEXT NOT NULL,
+      capability_json TEXT NOT NULL DEFAULT '{}',
+      preview_hash TEXT,
+      confirmation_hash TEXT,
+      confirmation_expires_at TEXT,
+      prepared_action_id TEXT,
+      status TEXT NOT NULL DEFAULT 'draft',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE SET NULL,
+      FOREIGN KEY (target_agent_profile_id) REFERENCES agent_profiles(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_builder_drafts_owner_status
+      ON agent_builder_drafts(owner_user_id, status, updated_at DESC);
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
@@ -348,6 +429,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 4, name: 'domain_tables', up: createDomainTables },
   { version: 5, name: 'runner_reliability_tables', up: createRunnerReliabilityTables },
   { version: 6, name: 'channel_reliability_tables', up: createChannelReliabilityTables },
+  { version: 7, name: 'capability_tables', up: createCapabilityTables },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {
