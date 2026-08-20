@@ -53,4 +53,17 @@ describe('统一渠道适配器', () => {
     expect(adapter.getStatus().status).toBe('connected');
     expect(transport.connectCount).toBe(2);
   });
+
+  it('飞书适配器支持最小流式更新，非流式渠道明确拒绝', async () => {
+    const feishuTransport = new FakeTransport();
+    const feishu = createChannelAdapter({ provider: 'feishu', capabilities: CHANNEL_CAPABILITIES.feishu, transport: feishuTransport });
+    await feishu.connect({ accountId: 'ca_feishu', credentials: {} });
+    const target = 'feishu:oc_group#account:ca_feishu#thread:topic#root:root';
+    await feishu.sendStreamingUpdate(target, '片段', 'stream-1', false);
+    expect(feishuTransport.sent[0]).toMatchObject({ kind: 'stream', streamId: 'stream-1', final: false });
+
+    const telegram = createChannelAdapter({ provider: 'telegram', capabilities: CHANNEL_CAPABILITIES.telegram, transport: new FakeTransport() });
+    await telegram.connect({ accountId: 'ca_telegram', credentials: {} });
+    await expect(telegram.sendStreamingUpdate('telegram:100#account:ca_telegram', '片段', 'stream-1', false)).rejects.toThrow('不支持');
+  });
 });

@@ -1,6 +1,7 @@
 import type { ChannelProvider } from '../channel-accounts.js';
 import { buildChannelJid, parseChannelJid } from './channel-address.js';
 import type { ChannelCapabilities } from './channel-capabilities.js';
+import { normalizeProviderInbound } from './channel-provider-rules.js';
 
 export type ChannelConversation = 'private' | 'group';
 export type ChannelStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'qr_required' | 'error';
@@ -39,6 +40,7 @@ export interface ChannelTransport {
   sendFile(target: TransportTarget, filePath: string, fileName: string): Promise<void>;
   sendImage(target: TransportTarget, data: Uint8Array, mimeType: string, caption?: string, fileName?: string): Promise<void>;
   react(target: TransportTarget, reaction: string): Promise<void>;
+  sendStreamingUpdate(target: TransportTarget, text: string, streamId: string, final: boolean): Promise<void>;
 }
 
 export interface ChannelInboundMessage extends TransportInboundMessage {
@@ -64,6 +66,7 @@ export interface ChannelAdapter {
   sendFile(chatJid: string, filePath: string, fileName: string): Promise<void>;
   sendImage(chatJid: string, data: Uint8Array, mimeType: string, caption?: string, fileName?: string): Promise<void>;
   react(chatJid: string, reaction: string): Promise<void>;
+  sendStreamingUpdate(chatJid: string, text: string, streamId: string, final: boolean): Promise<void>;
 }
 
 export function createChannelAdapter(options: {
@@ -93,15 +96,17 @@ export function createChannelAdapter(options: {
     try {
       await options.transport.connect(credentials, {
         onMessage: (message) => {
+          const normalizedMessage = normalizeProviderInbound(options.provider, message);
+          if (!normalizedMessage) return;
           const jid = buildChannelJid({
             provider: options.provider,
-            externalChatId: message.externalChatId,
+            externalChatId: normalizedMessage.externalChatId,
             channelAccountId: accountId!,
-            ...(message.threadId ? { threadId: message.threadId } : {}),
-            ...(message.rootMessageId ? { rootMessageId: message.rootMessageId } : {}),
+            ...(normalizedMessage.threadId ? { threadId: normalizedMessage.threadId } : {}),
+            ...(normalizedMessage.rootMessageId ? { rootMessageId: normalizedMessage.rootMessageId } : {}),
           });
           const normalized: ChannelInboundMessage = {
-            ...message,
+            ...normalizedMessage,
             provider: options.provider,
             accountId: accountId!,
             chatJid: jid,
@@ -143,5 +148,9 @@ export function createChannelAdapter(options: {
     sendFile: async (chatJid, filePath, fileName) => options.transport.sendFile(toTarget(chatJid), filePath, fileName),
     sendImage: async (chatJid, data, mimeType, caption, fileName) => options.transport.sendImage(toTarget(chatJid), data, mimeType, caption, fileName),
     react: async (chatJid, reaction) => options.transport.react(toTarget(chatJid), reaction),
+    sendStreamingUpdate: async (chatJid, text, streamId, final) => {
+      if (!options.capabilities.supportsStreamingUpdates) throw new Error('当前渠道不支持流式更新');
+      return options.transport.sendStreamingUpdate(toTarget(chatJid), text, streamId, final);
+    },
   };
 }

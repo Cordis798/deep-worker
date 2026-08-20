@@ -10,7 +10,8 @@ export type FakeSentItem =
   | { kind: 'message'; target: TransportTarget; text: string }
   | { kind: 'file'; target: TransportTarget; filePath: string; fileName: string }
   | { kind: 'image'; target: TransportTarget; data: Uint8Array; mimeType: string; caption?: string; fileName?: string }
-  | { kind: 'reaction'; target: TransportTarget; reaction: string };
+  | { kind: 'reaction'; target: TransportTarget; reaction: string }
+  | { kind: 'stream'; target: TransportTarget; text: string; streamId: string; final: boolean };
 
 export class FakeTransport implements ChannelTransport {
   callbacks?: TransportCallbacks;
@@ -60,6 +61,11 @@ export class FakeTransport implements ChannelTransport {
   async react(target: TransportTarget, reaction: string): Promise<void> {
     this.ensureConnected();
     this.sent.push({ kind: 'reaction', target, reaction });
+  }
+
+  async sendStreamingUpdate(target: TransportTarget, text: string, streamId: string, final: boolean): Promise<void> {
+    this.ensureConnected();
+    this.sent.push({ kind: 'stream', target, text, streamId, final });
   }
 
   private ensureConnected(): void {

@@ -40,7 +40,7 @@ export function buildChannelJid(input: {
   const fragments = [`account:${encodeFragment(input.channelAccountId)}`];
   if (input.threadId) fragments.push(`thread:${encodeFragment(input.threadId)}`);
   if (input.rootMessageId) fragments.push(`root:${encodeFragment(input.rootMessageId)}`);
-  return `${CHANNEL_PREFIXES[input.provider]}${input.externalChatId}#${fragments.join('#')}`;
+  return `${CHANNEL_PREFIXES[input.provider]}${encodeFragment(input.externalChatId)}#${fragments.join('#')}`;
 }
 
 export function parseChannelJid(jid: string): ChannelAddress | null {
@@ -53,7 +53,7 @@ export function parseChannelJid(jid: string): ChannelAddress | null {
   const root = fragments.find((part) => part.startsWith('root:'));
   return {
     provider,
-    externalChatId,
+    externalChatId: decodeFragment(externalChatId),
     channelAccountId: account ? decodeFragment(account.slice('account:'.length)) : null,
     threadId: thread ? decodeFragment(thread.slice('thread:'.length)) : null,
     rootMessageId: root ? decodeFragment(root.slice('root:'.length)) : null,
