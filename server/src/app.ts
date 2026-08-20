@@ -17,6 +17,7 @@ import { createWorkspaceRoutes } from './routes/workspaces.js';
 import { createRunnerRoutes } from './routes/runner.js';
 import { createWorkspaceToolsRoutes } from './routes/workspace-tools.js';
 import { RuntimeRunnerService } from './runtime-runner-service.js';
+import { createCapabilityRoutes } from './routes/capabilities.js';
 
 export type App = Hono<{ Variables: AppVariables }> & {
   close: () => Promise<void>;
@@ -70,6 +71,7 @@ export function createApp(
   );
   app.route('/api/workspaces', workspaceTools);
   app.route('/api/channel-accounts', createChannelAccountRoutes(db));
+  app.route('/api/capabilities', createCapabilityRoutes(db));
 
   void runnerService.resumePending().catch((error) => {
     logger.error({ err: error }, 'Runner recovery failed');

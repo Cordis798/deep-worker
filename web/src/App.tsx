@@ -10,6 +10,8 @@ import { AppLayout } from './components/layout/AppLayout.js';
 import { LoginPage } from './pages/LoginPage.js';
 import { RegisterPage } from './pages/RegisterPage.js';
 import { RoutePlaceholder } from './pages/RoutePlaceholder.js';
+import { CapabilitiesPage } from './pages/CapabilitiesPage.js';
+import { AgentBuilderPage } from './pages/AgentBuilderPage.js';
 import { SetupPage } from './pages/SetupPage.js';
 import { ChatPage } from './pages/ChatPage.js';
 import { FilesPage } from './pages/FilesPage.js';
@@ -35,7 +37,8 @@ const routes = createRoutesFromElements(
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/monitor" element={<AuthGuard requiredPermission="manage_system_config"><MonitorPage /></AuthGuard>} />
       <Route path="/users" element={<AuthGuard requiredAnyPermissions={['manage_users', 'manage_invites', 'view_audit_log']}><UsersPage /></AuthGuard>} />
-      <Route path="/capabilities/:section?" element={<RoutePlaceholder title="能力" />} />
+      <Route path="/capabilities/:section?" element={<CapabilitiesPage />} />
+      <Route path="/agent-builder" element={<AgentBuilderPage />} />
       <Route path="/tasks" element={<RoutePlaceholder title="任务" />} />
       <Route path="/memory" element={<RoutePlaceholder title="记忆" />} />
       <Route path="/usage" element={<RoutePlaceholder title="用量" />} />
