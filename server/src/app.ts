@@ -22,6 +22,7 @@ import { createTaskRoutes } from './routes/tasks.js';
 import { createMemoryRoutes } from './routes/memory.js';
 import { TaskService } from './task-service.js';
 import { ContainerRunner } from './container-runner.js';
+import { createProviderRoutes } from './routes/providers.js';
 
 export type App = Hono<{ Variables: AppVariables }> & {
   close: () => Promise<void>;
@@ -79,6 +80,7 @@ export function createApp(
   app.route('/api/workspaces', workspaceTools);
   app.route('/api/channel-accounts', createChannelAccountRoutes(db));
   app.route('/api/capabilities', createCapabilityRoutes(db));
+  app.route('/api/providers', createProviderRoutes(db));
   app.route('/api/tasks', createTaskRoutes(taskService, db));
   app.route('/api/workspaces', createMemoryRoutes(db));
 

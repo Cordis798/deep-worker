@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 export class MigrationError extends Error {}
 
@@ -552,6 +552,28 @@ function migrateExecutionPolicy(db: Database.Database): void {
   ).run();
 }
 
+function createProviderTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS provider_configs (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model_id TEXT NOT NULL,
+      base_url TEXT,
+      secret_ref TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      weight INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(owner_user_id, name),
+      FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_provider_configs_owner
+      ON provider_configs(owner_user_id, enabled, created_at);
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
@@ -562,6 +584,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 7, name: 'capability_tables', up: createCapabilityTables },
   { version: 8, name: 'task_memory_tables', up: createTaskMemoryTables },
   { version: 9, name: 'execution_policy', up: migrateExecutionPolicy },
+  { version: 10, name: 'provider_tables', up: createProviderTables },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {

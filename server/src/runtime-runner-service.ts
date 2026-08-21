@@ -7,6 +7,8 @@ import { getOwnedAgentProfile } from './agent-profiles.js';
 import { getOwnedRuntimeSession } from './runtime-sessions.js';
 import { getOwnedWorkspace } from './workspaces.js';
 import { effectiveExecutionMode } from './execution-policy.js';
+import { getProviderBalance, getProviderCredentials, listProviderConfigs } from './provider-store.js';
+import { mapProviderToPiProvider, ProviderPool } from './provider-pool.js';
 import {
   appendRunnerOutboxEvent,
   claimRunnerTurn,
@@ -92,6 +94,7 @@ export class RuntimeRunnerService {
   private readonly retryBaseMs: number;
   private readonly workerId: string;
   private readonly queue: SessionQueue;
+  private readonly providerPools = new Map<string, ProviderPool>();
 
   constructor(options: RuntimeRunnerServiceOptions) {
     this.db = options.db;
@@ -156,6 +159,7 @@ export class RuntimeRunnerService {
   async close(): Promise<void> {
     this.queue.close();
     await this.runner.close();
+    if (this.containerRunner !== this.runner) await this.containerRunner.close();
   }
 
   private async processTurn(
@@ -175,6 +179,8 @@ export class RuntimeRunnerService {
         if (!current) throw new Error('Runner turn disappeared');
         return this.resultFromPersistence(current);
       }
+      let selectedProviderId: string | undefined;
+      let selectedProviderPool: ProviderPool | undefined;
       try {
         const session = getOwnedRuntimeSession(
           this.db,
@@ -185,6 +191,9 @@ export class RuntimeRunnerService {
         const workspace = getOwnedWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid);
         if (!session || session.status !== 'active' || !workspace)
           throw new Error('Runtime session not found');
+        selectedProviderPool = this.getProviderPool(inbox.ownerUserId);
+        const selectedProvider = selectedProviderPool?.selectProvider(inbox.sessionId);
+        selectedProviderId = selectedProvider?.id;
         const profile = session.agent_profile_id
           ? getOwnedAgentProfile(this.db, inbox.ownerUserId, session.agent_profile_id)
           : undefined;
@@ -200,6 +209,9 @@ export class RuntimeRunnerService {
           identityHash: profile?.identity_hash,
           capabilities: options.capabilities,
           capabilityHash: options.capabilities?.hash,
+          provider: selectedProvider
+            ? mapProviderToPiProvider(selectedProvider, getProviderCredentials(this.db, inbox.ownerUserId, selectedProvider.id))
+            : undefined,
         };
         const executionRunner = effectiveExecutionMode(this.db, workspace) === 'container'
           ? this.containerRunner
@@ -216,10 +228,12 @@ export class RuntimeRunnerService {
             nextOrdinal += 1;
           }
         }
+        if (selectedProviderId) selectedProviderPool?.reportSuccess(selectedProviderId);
         completeRunnerTurn(this.db, turnId, this.workerId, result.reply);
         const completed = getRunnerTurnById(this.db, turnId)!;
         return { turn: completed, reply: result.reply, events };
       } catch (error) {
+        if (typeof selectedProviderId === 'string') selectedProviderPool?.reportFailure(selectedProviderId, true);
         const message = error instanceof Error ? error.message : String(error);
         const current = getRunnerTurnById(this.db, turnId)!;
         if (current.attempt < this.maxAttempts) {
@@ -239,6 +253,15 @@ export class RuntimeRunnerService {
         return { turn: failed, reply: null, events };
       }
     }
+  }
+
+  private getProviderPool(ownerUserId: string): ProviderPool | undefined {
+    const configs = listProviderConfigs(this.db, ownerUserId);
+    if (!configs.length) return undefined;
+    const pool = this.providerPools.get(ownerUserId) ?? new ProviderPool();
+    pool.refreshFromConfig(configs, getProviderBalance(this.db, ownerUserId));
+    this.providerPools.set(ownerUserId, pool);
+    return pool;
   }
 
   private persistAndPublish(
