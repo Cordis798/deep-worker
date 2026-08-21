@@ -21,6 +21,7 @@ npm run format       # prettier 格式化
 - 后端：Hono + better-sqlite3 + Pino；执行引擎 Pi RPC（`pi --mode rpc`）。
 - 前端：React + Vite + Tailwind + Zustand。
 - 数据库迁移：`server/src/db/migration.ts`，用 `config_kv.schema_version` 跟踪版本，升级前自动备份，拒绝降级。
+- 用量与账务：`server/src/usage-service.ts` 以 `eventId` 做幂等账本，`server/src/billing.ts` 管理套餐、订阅、余额、兑换码和配额；扣费与汇总必须在 SQLite 事务内完成。
 - 共享类型放 `shared`，三方跨包引用统一走 workspace 依赖。
 
 ## 完成条件（阶段门禁）
@@ -48,3 +49,4 @@ git diff --check
 - 不引入非必要依赖；确有必要时说明理由并随 commit 提交。
 - 只修改当前阶段任务列出的文件；避免范围外改动。
 - 不得用 `git reset --hard` / `git checkout --` 覆盖未提交的他人改动。
+- 不得把支付网关、真实密钥或第三方账务服务加入本地计费实现；计费范围仅限可测试的 SQLite 账本。
