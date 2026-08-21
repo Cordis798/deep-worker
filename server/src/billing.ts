@@ -93,7 +93,7 @@ function now(): string { return new Date().toISOString(); }
 
 export function isBillingEnabled(db: Database.Database): boolean {
   const row = db.prepare("SELECT value FROM config_kv WHERE key = 'billing_enabled'").get() as { value?: string } | undefined;
-  return row?.value === undefined ? true : row.value === 'true';
+  return row?.value === undefined ? false : row.value === 'true';
 }
 
 export function setBillingEnabled(db: Database.Database, enabled: boolean): void {

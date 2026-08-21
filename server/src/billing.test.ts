@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { initDatabase } from './db/migration.js';
 import { createUser } from './users.js';
-import { adjustBalance, assignPlan, checkBillingAccess, checkQuota, createBillingPlan, createRedeemCode, getBalance, redeemCode, setQuotaOverride } from './billing.js';
+import { adjustBalance, assignPlan, checkBillingAccess, checkQuota, createBillingPlan, createRedeemCode, getBalance, isBillingEnabled, redeemCode, setBillingEnabled, setQuotaOverride } from './billing.js';
 import { recordUsageEvent } from './usage-service.js';
 import { createWorkspace } from './workspaces.js';
 
@@ -10,11 +10,20 @@ function fixture() {
   const timestamp = new Date().toISOString();
   createUser(db, { id: 'admin', username: 'admin', password_hash: 'x', display_name: '管理员', role: 'admin', status: 'active', created_at: timestamp, updated_at: timestamp });
   createUser(db, { id: 'member', username: 'member', password_hash: 'x', display_name: '成员', role: 'member', status: 'active', created_at: timestamp, updated_at: timestamp });
+  setBillingEnabled(db, true);
   const workspace = createWorkspace(db, 'member', { name: '计费工作区', folder: 'billing-fixture' })!;
   return { db, workspace };
 }
 
 describe('计费与配额', () => {
+  it('默认关闭本地计费时，零余额用户仍可访问模型', () => {
+    const db = initDatabase(':memory:');
+    const timestamp = new Date().toISOString();
+    createUser(db, { id: 'member', username: 'member', password_hash: 'x', display_name: '成员', role: 'member', status: 'active', created_at: timestamp, updated_at: timestamp });
+    expect(isBillingEnabled(db)).toBe(false);
+    expect(checkBillingAccess(db, 'member', 'member')).toMatchObject({ allowed: true, balanceUSD: 0 });
+  });
+
   it('兑换码和余额调整幂等，日度 Token 超限会阻断执行', () => {
     const { db, workspace } = fixture();
     createBillingPlan(db, { id: 'starter', name: '入门套餐', dailyTokenQuota: 5, allowOverage: true });

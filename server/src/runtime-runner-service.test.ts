@@ -9,6 +9,7 @@ import {
   getRunnerTurnById,
   listRunnerOutbox,
 } from './runner-reliability.js';
+import { setBillingEnabled } from './billing.js';
 import { RuntimeRunnerService } from './runtime-runner-service.js';
 
 let db: Database.Database;
@@ -105,6 +106,7 @@ describe('RuntimeRunnerService', () => {
   });
 
   it('does not retry billing failures and persists a readable terminal event', async () => {
+    setBillingEnabled(db, true);
     db.prepare('INSERT INTO user_balances (user_id, balance_usd, updated_at) VALUES (?, ?, ?)').run(
       'u1',
       -0.01,
@@ -129,6 +131,29 @@ describe('RuntimeRunnerService', () => {
       statusText: 'agent failed',
       detail: '余额不足，至少需要 $0.00',
     });
+    await service.close();
+  });
+
+  it('关闭本地计费时，零余额消息仍会进入 Runner', async () => {
+    db.prepare('INSERT INTO user_balances (user_id, balance_usd, updated_at) VALUES (?, ?, ?)').run(
+      'u1',
+      0,
+      new Date().toISOString(),
+    );
+    const runner = new FakePiRunner({ response: '已调用模型' });
+    const service = new RuntimeRunnerService({ db, runner, retryBaseMs: 0 });
+
+    const result = await service.submit({
+      ownerUserId: 'u1',
+      workspaceJid: 'w1',
+      sessionId: 's1',
+      message: '无余额也执行',
+      idempotencyKey: 'free-model-call',
+    });
+
+    expect(result.reply).toBe('已调用模型');
+    expect(result.turn.status).toBe('completed');
+    expect(runner.calls).toHaveLength(1);
     await service.close();
   });
 
