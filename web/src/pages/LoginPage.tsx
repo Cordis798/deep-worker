@@ -86,18 +86,20 @@ function Field({
   onChange,
   type = 'text',
   autoComplete,
+  required = true,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
   autoComplete?: string;
+  required?: boolean;
 }) {
   return (
     <label className="block text-sm font-medium text-slate-700">
       <span>{label}</span>
       <input
-        required
+        required={required}
         type={type}
         autoComplete={autoComplete}
         value={value}
