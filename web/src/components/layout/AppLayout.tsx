@@ -8,6 +8,8 @@ const navItems = [
   { to: '/terminal', label: '终端', icon: '⌘' },
   { to: '/tasks', label: '任务', icon: '◷' },
   { to: '/memory', label: '记忆', icon: '◇' },
+  { to: '/usage', label: '用量', icon: '◒' },
+  { to: '/billing', label: '账单', icon: '$' },
   { to: '/settings', label: '设置', icon: '⚙' },
 ];
 

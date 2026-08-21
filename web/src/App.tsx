@@ -22,6 +22,8 @@ import { MonitorPage } from './pages/MonitorPage.js';
 import { UsersPage } from './pages/UsersPage.js';
 import { TasksPage } from './pages/TasksPage.js';
 import { MemoryPage } from './pages/MemoryPage.js';
+import { UsagePage } from './pages/UsagePage.js';
+import { BillingPage } from './pages/BillingPage.js';
 
 const routes = createRoutesFromElements(
   <>
@@ -43,8 +45,8 @@ const routes = createRoutesFromElements(
       <Route path="/agent-builder" element={<AgentBuilderPage />} />
       <Route path="/tasks" element={<TasksPage />} />
       <Route path="/memory" element={<MemoryPage />} />
-      <Route path="/usage" element={<RoutePlaceholder title="用量" />} />
-      <Route path="/billing" element={<RoutePlaceholder title="计费" />} />
+      <Route path="/usage" element={<UsagePage />} />
+      <Route path="/billing" element={<BillingPage />} />
       <Route path="/skills" element={<Navigate to="/capabilities/skills" replace />} />
       <Route path="/mcp-servers" element={<Navigate to="/capabilities/mcp" replace />} />
       <Route path="/plugins" element={<Navigate to="/capabilities/plugins" replace />} />
