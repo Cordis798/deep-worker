@@ -23,6 +23,8 @@ import { createMemoryRoutes } from './routes/memory.js';
 import { TaskService } from './task-service.js';
 import { ContainerRunner } from './container-runner.js';
 import { createProviderRoutes } from './routes/providers.js';
+import { createMonitorRoutes } from './routes/monitor.js';
+import type { ContainerRunnerStatusSource } from './monitoring.js';
 
 export type App = Hono<{ Variables: AppVariables }> & {
   close: () => Promise<void>;
@@ -45,6 +47,7 @@ export function createApp(
       queueOptions: { maxAttempts: 1 },
     });
   const containerRunner = options.runner ? options.runner : new ContainerRunner();
+  const containerRunnerStatus = containerRunner as unknown as ContainerRunnerStatusSource;
   const runnerService = options.runnerService ?? new RuntimeRunnerService({ db, runner, containerRunner });
   const taskService = options.taskService ?? new TaskService({ db, runnerService });
   const app = new Hono<{ Variables: AppVariables }>();
@@ -81,6 +84,7 @@ export function createApp(
   app.route('/api/channel-accounts', createChannelAccountRoutes(db));
   app.route('/api/capabilities', createCapabilityRoutes(db));
   app.route('/api/providers', createProviderRoutes(db));
+  app.route('/api/monitor', createMonitorRoutes(db, runnerService, taskService, containerRunnerStatus));
   app.route('/api/tasks', createTaskRoutes(taskService, db));
   app.route('/api/workspaces', createMemoryRoutes(db));
 

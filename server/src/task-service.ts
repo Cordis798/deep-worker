@@ -140,6 +140,17 @@ export class TaskService {
     this.pump();
   }
 
+  getStatus(): { queued: number; running: number; failed: number; activeProcesses: number } {
+    const counts = this.db.prepare(
+      `SELECT
+         SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued,
+         SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running,
+         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+       FROM task_runs WHERE status IN ('queued', 'running', 'failed')`,
+    ).get() as { queued: number | null; running: number | null; failed: number | null };
+    return { queued: counts.queued ?? 0, running: counts.running ?? 0, failed: counts.failed ?? 0, activeProcesses: this.activeProcesses.size };
+  }
+
   private pump(): void {
     if (this.closed) return;
     this.deliverNotifications();

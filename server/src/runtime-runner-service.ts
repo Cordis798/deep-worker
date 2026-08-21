@@ -264,6 +264,16 @@ export class RuntimeRunnerService {
     return pool;
   }
 
+  getProviderHealthStatuses(): Array<{ ownerUserId: string; provider: ReturnType<ProviderPool['getHealthStatuses']>[number] }> {
+    return [...this.providerPools.entries()].flatMap(([ownerUserId, pool]) =>
+      pool.getHealthStatuses().map((provider) => ({ ownerUserId, provider })),
+    );
+  }
+
+  getQueueStatus(): { pending: number } {
+    return { pending: this.queue.pendingCount() };
+  }
+
   private persistAndPublish(
     sessionId: string,
     turnId: string,
