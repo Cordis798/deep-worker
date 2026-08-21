@@ -67,8 +67,16 @@ type RpcCommandBody = RpcCommand extends infer Command
     : never
   : never;
 
-const defaultSpawn: RpcSpawnProcess = (command, args, options) =>
-  spawn(command, args, options) as unknown as RpcProcessLike;
+const defaultSpawn: RpcSpawnProcess = (command, args, options) => {
+  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(command)) {
+    return spawn(
+      process.env.ComSpec ?? 'cmd.exe',
+      ['/d', '/s', '/c', command, ...args],
+      options,
+    ) as unknown as RpcProcessLike;
+  }
+  return spawn(command, args, options) as unknown as RpcProcessLike;
+};
 
 function defaultCommand(): string {
   return process.platform === 'win32' ? 'pi.cmd' : 'pi';
