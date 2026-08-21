@@ -32,6 +32,7 @@ export interface ContainerRunnerOptions {
   dockerCommand?: string;
   defaultLimits?: Partial<ContainerLimits>;
   spawnClient?: (options: ConstructorParameters<typeof PiRpcClient>[0]) => SessionClient;
+  validateAdditionalMounts?: (ownerUserId: string | undefined, mounts: readonly ContainerMount[]) => ContainerMount[];
 }
 
 interface ManagedContainerSession {
@@ -144,24 +145,31 @@ export class ContainerRunner implements AgentRunner {
     if (request.provider && session.client.setModel) {
       await session.client.setModel(request.provider.provider, request.provider.modelId);
     }
-    const completed = await session.client.promptAndWait?.(prompt, {
-      timeoutMs: request.timeoutMs,
-      onEvent: (rawEvent) => {
-        rawEvents.push(rawEvent);
-        for (const event of mapPiEvent(rawEvent, {
-          sessionId: request.sessionId,
-          turnId: request.turnId,
-          queryRunId: request.queryRunId,
-        })) {
-          events.push(event);
-          onEvent?.(event);
-        }
-      },
-    });
-    if (!completed) throw new Error('容器 Pi 会话不支持 prompt');
-    const reply = extractFinalReply(rawEvents) || (await session.client.getLastAssistantText?.()) || '';
-    session.lastUsedAt = Date.now();
-    return { sessionId: request.sessionId, reply, events, attempts: 1 };
+    try {
+      const completed = await session.client.promptAndWait?.(prompt, {
+        timeoutMs: request.timeoutMs,
+        onEvent: (rawEvent) => {
+          rawEvents.push(rawEvent);
+          for (const event of mapPiEvent(rawEvent, {
+            sessionId: request.sessionId,
+            turnId: request.turnId,
+            queryRunId: request.queryRunId,
+          })) {
+            events.push(event);
+            onEvent?.(event);
+          }
+        },
+      });
+      if (!completed) throw new Error('容器 Pi 会话不支持 prompt');
+      const reply = extractFinalReply(rawEvents) || (await session.client.getLastAssistantText?.()) || '';
+      session.lastUsedAt = Date.now();
+      return { sessionId: request.sessionId, reply, events, attempts: 1 };
+    } catch (error) {
+      // 超时或 RPC 退出后销毁容器，避免遗留进程继续占用资源。
+      this.sessions.delete(request.sessionId);
+      await session.client.close().catch(() => undefined);
+      throw error;
+    }
   }
 
   async close(): Promise<void> {
@@ -187,8 +195,11 @@ export class ContainerRunner implements AgentRunner {
     }
     const sessionDir = path.resolve(request.sessionDir ?? path.join(DATA_DIR, 'container-sessions', request.sessionId));
     fs.mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+    const additionalMounts = request.containerMounts && this.options.validateAdditionalMounts
+      ? this.options.validateAdditionalMounts(request.ownerUserId, request.containerMounts)
+      : request.containerMounts;
     const built = buildContainerArgs(
-      { cwd: request.cwd, sessionDir, mounts: request.containerMounts, limits: request.containerLimits },
+      { cwd: request.cwd, sessionDir, mounts: additionalMounts, limits: request.containerLimits },
       { image: this.options.image, dockerCommand: this.options.dockerCommand, limits: this.options.defaultLimits },
     );
     const client = (this.options.spawnClient ?? ((clientOptions) => new PiRpcClient(clientOptions)))({

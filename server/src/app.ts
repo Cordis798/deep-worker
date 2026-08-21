@@ -25,6 +25,7 @@ import { ContainerRunner } from './container-runner.js';
 import { createProviderRoutes } from './routes/providers.js';
 import { createMonitorRoutes } from './routes/monitor.js';
 import type { ContainerRunnerStatusSource } from './monitoring.js';
+import { readMountAllowlist, validateAdditionalMounts } from './mount-security.js';
 
 export type App = Hono<{ Variables: AppVariables }> & {
   close: () => Promise<void>;
@@ -46,7 +47,9 @@ export function createApp(
       baseDir: path.join(DATA_DIR, 'pi-sessions'),
       queueOptions: { maxAttempts: 1 },
     });
-  const containerRunner = options.runner ? options.runner : new ContainerRunner();
+  const containerRunner = options.runner ? options.runner : new ContainerRunner({
+    validateAdditionalMounts: (_ownerUserId, mounts) => validateAdditionalMounts(mounts, readMountAllowlist(db)),
+  });
   const containerRunnerStatus = containerRunner as unknown as ContainerRunnerStatusSource;
   const runnerService = options.runnerService ?? new RuntimeRunnerService({ db, runner, containerRunner });
   const taskService = options.taskService ?? new TaskService({ db, runnerService });

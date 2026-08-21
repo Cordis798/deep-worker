@@ -9,6 +9,7 @@ import { getOwnedWorkspace } from './workspaces.js';
 import { effectiveExecutionMode } from './execution-policy.js';
 import { getProviderBalance, getProviderCredentials, listProviderConfigs } from './provider-store.js';
 import { mapProviderToPiProvider, ProviderPool } from './provider-pool.js';
+import { runnerLifecycle } from './runner-lifecycle.js';
 import {
   appendRunnerOutboxEvent,
   claimRunnerTurn,
@@ -198,6 +199,7 @@ export class RuntimeRunnerService {
           ? getOwnedAgentProfile(this.db, inbox.ownerUserId, session.agent_profile_id)
           : undefined;
         const request: AgentRunRequest = {
+          ownerUserId: inbox.ownerUserId,
           sessionId: inbox.sessionId,
           message: inbox.message,
           cwd: workspace.folder,
@@ -216,6 +218,7 @@ export class RuntimeRunnerService {
         const executionRunner = effectiveExecutionMode(this.db, workspace) === 'container'
           ? this.containerRunner
           : this.runner;
+        await runnerLifecycle.waitUntilResumed();
         const result = await executionRunner.run(request, (event) => {
           events.push(event);
           this.persistAndPublish(inbox.sessionId, turnId, nextOrdinal, event);

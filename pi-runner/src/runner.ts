@@ -8,6 +8,7 @@ import type { RpcEvent } from './rpc-types.js';
 import type { PiCapabilityInjection } from './capability-injection.js';
 
 export interface AgentRunRequest {
+  ownerUserId?: string;
   sessionId: string;
   message: string;
   cwd?: string;

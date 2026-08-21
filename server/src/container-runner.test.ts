@@ -99,4 +99,27 @@ describe('容器运行器', () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it('超时或 RPC 失败时清理容器会话', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-container-'));
+    const workspace = path.join(root, 'workspace');
+    const session = path.join(root, 'session');
+    fs.mkdirSync(workspace);
+    fs.mkdirSync(session);
+    let clientClosed = false;
+    const client = {
+      start: async () => undefined,
+      close: async () => { clientClosed = true; },
+      getState: async () => ({ sessionId: 'container-session' }),
+      promptAndWait: async () => { throw new Error('Pi RPC 超时'); },
+    };
+    try {
+      const runner = new ContainerRunner({ spawnClient: () => client });
+      await expect(runner.run({ sessionId: 'failed-session', message: '失败任务', cwd: workspace, sessionDir: session })).rejects.toThrow('Pi RPC 超时');
+      expect(clientClosed).toBe(true);
+      expect(runner.size()).toBe(0);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
