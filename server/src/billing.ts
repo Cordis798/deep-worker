@@ -46,6 +46,24 @@ export interface QuotaUsage {
   monthlyCostUSD: number;
 }
 
+export type QuotaScopeType = 'user' | 'agent' | 'workspace';
+
+export interface QuotaScope {
+  agentId?: string | null;
+  workspaceJid?: string | null;
+}
+
+export interface QuotaOverride {
+  scopeType: QuotaScopeType;
+  scopeId: string;
+  dailyTokenQuota: number | null;
+  dailyCostQuota: number | null;
+  weeklyTokenQuota: number | null;
+  weeklyCostQuota: number | null;
+  monthlyTokenQuota: number | null;
+  monthlyCostQuota: number | null;
+}
+
 export interface RedeemCodeInput {
   code: string;
   type: 'balance' | 'subscription' | 'trial';
@@ -203,26 +221,83 @@ function quotaUsage(db: Database.Database, userId: string): QuotaUsage {
   return { dailyTokens: daily?.tokens ?? 0, dailyCostUSD: daily?.cost ?? 0, weeklyTokens: weekly.tokens ?? 0, weeklyCostUSD: weekly.cost ?? 0, monthlyTokens: monthly?.tokens ?? 0, monthlyCostUSD: monthly?.cost ?? 0 };
 }
 
-export function checkQuota(db: Database.Database, userId: string, role: string): BillingAccessResult {
+function scopedQuotaUsage(db: Database.Database, userId: string, scopeType: 'agent' | 'workspace', scopeId: string): QuotaUsage {
+  const field = scopeType === 'agent' ? 'e.agent_id' : 'e.workspace_jid';
+  const today = new Date();
+  const day = today.toISOString().slice(0, 10);
+  const month = day.slice(0, 7);
+  const week = mondayStart(today);
+  const sum = (from: string, to: string) => db.prepare(`SELECT COALESCE(SUM(m.input_tokens + m.output_tokens + m.cache_read_input_tokens + m.cache_creation_input_tokens + m.reasoning_tokens), 0) tokens, COALESCE(SUM(m.provider_estimated_cost_usd), 0) cost FROM usage_events e JOIN usage_event_models m ON m.event_id = e.event_id WHERE e.user_id = ? AND ${field} = ? AND e.created_at >= ? AND e.created_at < ?`).get(userId, scopeId, `${from}T00:00:00.000Z`, `${to}T23:59:59.999Z`) as { tokens: number; cost: number };
+  const daily = sum(day, day);
+  const weekly = sum(week, day);
+  const monthly = sum(`${month}-01`, day);
+  return { dailyTokens: daily.tokens, dailyCostUSD: daily.cost, weeklyTokens: weekly.tokens, weeklyCostUSD: weekly.cost, monthlyTokens: monthly.tokens, monthlyCostUSD: monthly.cost };
+}
+
+function quotaOverrideFromRow(row: Record<string, unknown> | undefined): QuotaOverride | null {
+  if (!row) return null;
+  return { scopeType: row.scope_type as QuotaScopeType, scopeId: String(row.scope_id), dailyTokenQuota: row.daily_token_quota == null ? null : Number(row.daily_token_quota), dailyCostQuota: row.daily_cost_quota == null ? null : Number(row.daily_cost_quota), weeklyTokenQuota: row.weekly_token_quota == null ? null : Number(row.weekly_token_quota), weeklyCostQuota: row.weekly_cost_quota == null ? null : Number(row.weekly_cost_quota), monthlyTokenQuota: row.monthly_token_quota == null ? null : Number(row.monthly_token_quota), monthlyCostQuota: row.monthly_cost_quota == null ? null : Number(row.monthly_cost_quota) };
+}
+
+export function getQuotaOverride(db: Database.Database, scopeType: QuotaScopeType, scopeId: string): QuotaOverride | null {
+  return quotaOverrideFromRow(db.prepare('SELECT * FROM billing_quota_overrides WHERE scope_type = ? AND scope_id = ?').get(scopeType, scopeId) as Record<string, unknown> | undefined);
+}
+
+export function listQuotaOverrides(db: Database.Database): QuotaOverride[] {
+  return (db.prepare('SELECT * FROM billing_quota_overrides ORDER BY scope_type, scope_id').all() as Array<Record<string, unknown>>).map((row) => quotaOverrideFromRow(row)!);
+}
+
+export function setQuotaOverride(db: Database.Database, input: QuotaOverride): QuotaOverride {
+  if (!input.scopeId.trim()) throw new Error('配额作用域不能为空');
+  const values = [input.dailyTokenQuota, input.weeklyTokenQuota, input.monthlyTokenQuota];
+  if (values.some((value) => value !== null && (!Number.isInteger(value) || value < 0))) throw new Error('Token 配额必须是非负整数');
+  const costs = [input.dailyCostQuota, input.weeklyCostQuota, input.monthlyCostQuota];
+  if (costs.some((value) => value !== null && (!Number.isFinite(value) || value < 0))) throw new Error('费用配额必须是非负数');
+  if (values.every((value) => value === null) && costs.every((value) => value === null)) throw new Error('至少设置一项配额');
+  const timestamp = now();
+  db.prepare(`INSERT INTO billing_quota_overrides (scope_type, scope_id, daily_token_quota, daily_cost_quota, weekly_token_quota, weekly_cost_quota, monthly_token_quota, monthly_cost_quota, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(scope_type, scope_id) DO UPDATE SET daily_token_quota = excluded.daily_token_quota, daily_cost_quota = excluded.daily_cost_quota, weekly_token_quota = excluded.weekly_token_quota, weekly_cost_quota = excluded.weekly_cost_quota, monthly_token_quota = excluded.monthly_token_quota, monthly_cost_quota = excluded.monthly_cost_quota, updated_at = excluded.updated_at`).run(input.scopeType, input.scopeId.trim(), input.dailyTokenQuota, input.dailyCostQuota, input.weeklyTokenQuota, input.weeklyCostQuota, input.monthlyTokenQuota, input.monthlyCostQuota, timestamp, timestamp);
+  return getQuotaOverride(db, input.scopeType, input.scopeId.trim())!;
+}
+
+export function deleteQuotaOverride(db: Database.Database, scopeType: QuotaScopeType, scopeId: string): boolean {
+  return db.prepare('DELETE FROM billing_quota_overrides WHERE scope_type = ? AND scope_id = ?').run(scopeType, scopeId).changes === 1;
+}
+
+function checkQuotaWindow(usage: QuotaUsage, limits: { dailyTokenQuota: number | null; dailyCostQuota: number | null; weeklyTokenQuota: number | null; weeklyCostQuota: number | null; monthlyTokenQuota: number | null; monthlyCostQuota: number | null }, label: string): { window: 'daily' | 'weekly' | 'monthly'; reason: string; usage: QuotaUsage; resetAt: string } | null {
+  const checks: Array<{ window: 'daily' | 'weekly' | 'monthly'; tokens: number; cost: number; tokenQuota: number | null; costQuota: number | null; resetAt: string }> = [
+    { window: 'daily', tokens: usage.dailyTokens, cost: usage.dailyCostUSD, tokenQuota: limits.dailyTokenQuota, costQuota: limits.dailyCostQuota, resetAt: new Date(Date.now() + 86400000).toISOString() },
+    { window: 'weekly', tokens: usage.weeklyTokens, cost: usage.weeklyCostUSD, tokenQuota: limits.weeklyTokenQuota, costQuota: limits.weeklyCostQuota, resetAt: new Date(Date.now() + 7 * 86400000).toISOString() },
+    { window: 'monthly', tokens: usage.monthlyTokens, cost: usage.monthlyCostUSD, tokenQuota: limits.monthlyTokenQuota, costQuota: limits.monthlyCostQuota, resetAt: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1)).toISOString() },
+  ];
+  for (const check of checks) {
+    if ((check.tokenQuota !== null && check.tokens >= check.tokenQuota) || (check.costQuota !== null && check.cost >= check.costQuota)) return { window: check.window, reason: `${label}${check.window === 'daily' ? '日' : check.window === 'weekly' ? '周' : '月'}度配额已达上限`, usage, resetAt: check.resetAt };
+  }
+  return null;
+}
+
+export function checkQuota(db: Database.Database, userId: string, role: string, scope: QuotaScope = {}): BillingAccessResult {
   if (role === 'admin' || !isBillingEnabled(db)) return { allowed: true, balanceUSD: getBalance(db, userId).balanceUSD, minBalanceUSD: getBillingMinStartBalance(db) };
   const effective = getUserEffectivePlan(db, userId);
   const usage = quotaUsage(db, userId);
   if (!effective) return { allowed: false, blockType: 'plan_inactive', reason: '未找到有效套餐，请联系管理员', balanceUSD: getBalance(db, userId).balanceUSD, minBalanceUSD: getBillingMinStartBalance(db), usage };
-  const checks: Array<{ window: 'daily' | 'weekly' | 'monthly'; tokens: number; cost: number; tokenQuota: number | null; costQuota: number | null; resetAt: string }> = [
-    { window: 'daily', tokens: usage.dailyTokens, cost: usage.dailyCostUSD, tokenQuota: effective.plan.dailyTokenQuota, costQuota: effective.plan.dailyCostQuota, resetAt: new Date(Date.now() + 86400000).toISOString() },
-    { window: 'weekly', tokens: usage.weeklyTokens, cost: usage.weeklyCostUSD, tokenQuota: effective.plan.weeklyTokenQuota, costQuota: effective.plan.weeklyCostQuota, resetAt: new Date(Date.now() + 7 * 86400000).toISOString() },
-    { window: 'monthly', tokens: usage.monthlyTokens, cost: usage.monthlyCostUSD, tokenQuota: effective.plan.monthlyTokenQuota, costQuota: effective.plan.monthlyCostQuota, resetAt: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() + 1, 1)).toISOString() },
-  ];
-  for (const check of checks) {
-    if ((check.tokenQuota !== null && check.tokens >= check.tokenQuota) || (check.costQuota !== null && check.cost >= check.costQuota)) {
-      return { allowed: false, blockType: 'quota_exceeded', reason: `${check.window === 'daily' ? '日' : check.window === 'weekly' ? '周' : '月'}度配额已达上限`, balanceUSD: getBalance(db, userId).balanceUSD, minBalanceUSD: getBillingMinStartBalance(db), plan: effective.plan, exceededWindow: check.window, resetAt: check.resetAt, warningPercent: 100, usage };
-    }
+  const userOverride = getQuotaOverride(db, 'user', userId);
+  const userLimits = { dailyTokenQuota: userOverride?.dailyTokenQuota ?? effective.plan.dailyTokenQuota, dailyCostQuota: userOverride?.dailyCostQuota ?? effective.plan.dailyCostQuota, weeklyTokenQuota: userOverride?.weeklyTokenQuota ?? effective.plan.weeklyTokenQuota, weeklyCostQuota: userOverride?.weeklyCostQuota ?? effective.plan.weeklyCostQuota, monthlyTokenQuota: userOverride?.monthlyTokenQuota ?? effective.plan.monthlyTokenQuota, monthlyCostQuota: userOverride?.monthlyCostQuota ?? effective.plan.monthlyCostQuota };
+  const userExceeded = checkQuotaWindow(usage, userLimits, '用户');
+  if (userExceeded) return { allowed: false, blockType: 'quota_exceeded', reason: userExceeded.reason, balanceUSD: getBalance(db, userId).balanceUSD, minBalanceUSD: getBillingMinStartBalance(db), plan: effective.plan, exceededWindow: userExceeded.window, resetAt: userExceeded.resetAt, warningPercent: 100, usage: userExceeded.usage };
+  const scopedChecks: Array<{ type: 'agent' | 'workspace'; id: string | null | undefined; label: string }> = [{ type: 'agent', id: scope.agentId, label: 'Agent' }, { type: 'workspace', id: scope.workspaceJid, label: 'Workspace' }];
+  for (const item of scopedChecks) {
+    if (!item.id) continue;
+    const override = getQuotaOverride(db, item.type, item.id);
+    if (!override) continue;
+    const scopedUsage = scopedQuotaUsage(db, userId, item.type, item.id);
+    const exceeded = checkQuotaWindow(scopedUsage, override, item.label);
+    if (exceeded) return { allowed: false, blockType: 'quota_exceeded', reason: exceeded.reason, balanceUSD: getBalance(db, userId).balanceUSD, minBalanceUSD: getBillingMinStartBalance(db), plan: effective.plan, exceededWindow: exceeded.window, resetAt: exceeded.resetAt, warningPercent: 100, usage: exceeded.usage };
   }
   return { allowed: true, balanceUSD: getBalance(db, userId).balanceUSD, minBalanceUSD: getBillingMinStartBalance(db), plan: effective.plan, usage };
 }
 
-export function checkBillingAccess(db: Database.Database, userId: string, role: string): BillingAccessResult {
-  const quota = checkQuota(db, userId, role);
+export function checkBillingAccess(db: Database.Database, userId: string, role: string, scope: QuotaScope = {}): BillingAccessResult {
+  const quota = checkQuota(db, userId, role, scope);
   if (!quota.allowed) return quota;
   const minBalanceUSD = getBillingMinStartBalance(db);
   if (role !== 'admin' && isBillingEnabled(db) && quota.balanceUSD < minBalanceUSD) return { ...quota, allowed: false, blockType: 'insufficient_balance', reason: `余额不足，至少需要 $${minBalanceUSD.toFixed(2)}`, minBalanceUSD };

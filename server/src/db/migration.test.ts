@@ -106,6 +106,7 @@ describe('sqlite migration framework', () => {
       'billing_plans', 'user_subscriptions', 'user_balances', 'balance_transactions',
       'monthly_usage', 'daily_usage', 'redeem_codes', 'redeem_code_usage',
       'billing_audit_log', 'usage_events', 'usage_event_models', 'usage_daily_summary',
+      'billing_quota_overrides',
     ]) {
       expect(
         db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),

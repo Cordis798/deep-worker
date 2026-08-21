@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 11;
+export const CURRENT_SCHEMA_VERSION = 12;
 
 export class MigrationError extends Error {}
 
@@ -788,6 +788,24 @@ function createUsageBillingTables(db: Database.Database): void {
   `);
 }
 
+function createQuotaOverrideTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS billing_quota_overrides (
+      scope_type TEXT NOT NULL CHECK (scope_type IN ('user', 'agent', 'workspace')),
+      scope_id TEXT NOT NULL,
+      daily_token_quota INTEGER,
+      daily_cost_quota REAL,
+      weekly_token_quota INTEGER,
+      weekly_cost_quota REAL,
+      monthly_token_quota INTEGER,
+      monthly_cost_quota REAL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (scope_type, scope_id)
+    );
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
@@ -800,6 +818,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 9, name: 'execution_policy', up: migrateExecutionPolicy },
   { version: 10, name: 'provider_tables', up: createProviderTables },
   { version: 11, name: 'usage_billing_tables', up: createUsageBillingTables },
+  { version: 12, name: 'billing_quota_overrides', up: createQuotaOverrideTables },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {

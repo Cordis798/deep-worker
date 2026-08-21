@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { initDatabase } from './db/migration.js';
 import { createUser } from './users.js';
-import { adjustBalance, assignPlan, checkBillingAccess, checkQuota, createBillingPlan, createRedeemCode, getBalance, redeemCode } from './billing.js';
+import { adjustBalance, assignPlan, checkBillingAccess, checkQuota, createBillingPlan, createRedeemCode, getBalance, redeemCode, setQuotaOverride } from './billing.js';
 import { recordUsageEvent } from './usage-service.js';
 import { createWorkspace } from './workspaces.js';
 
@@ -37,5 +37,18 @@ describe('计费与配额', () => {
     expect(db.prepare('SELECT id FROM billing_plans WHERE is_default = 1').get()).toEqual({ id: 'pro' });
     assignPlan(db, 'member', 'pro', 'admin');
     expect(() => db.prepare('DELETE FROM billing_plans WHERE id = ?').run('pro')).toThrow();
+  });
+
+  it('按 Agent 和 Workspace 分别执行配额检查', () => {
+    const { db, workspace } = fixture();
+    createBillingPlan(db, { id: 'unlimited', name: '不限量套餐', allowOverage: true });
+    assignPlan(db, 'member', 'unlimited', 'admin');
+    setQuotaOverride(db, { scopeType: 'agent', scopeId: 'agent-a', dailyTokenQuota: 5, dailyCostQuota: null, weeklyTokenQuota: null, weeklyCostQuota: null, monthlyTokenQuota: null, monthlyCostQuota: null });
+    recordUsageEvent({ db, userId: 'member', workspaceJid: workspace.jid, agentId: 'agent-a', eventId: 'agent-quota-event', usage: { inputTokens: 6, outputTokens: 0 }, createdAt: '2026-08-21T10:00:00.000Z' });
+    expect(checkQuota(db, 'member', 'member', { agentId: 'agent-a', workspaceJid: workspace.jid })).toMatchObject({ allowed: false, blockType: 'quota_exceeded' });
+    expect(checkQuota(db, 'member', 'member', { agentId: 'agent-b', workspaceJid: workspace.jid })).toMatchObject({ allowed: true });
+
+    setQuotaOverride(db, { scopeType: 'workspace', scopeId: workspace.jid, dailyTokenQuota: 5, dailyCostQuota: null, weeklyTokenQuota: null, weeklyCostQuota: null, monthlyTokenQuota: null, monthlyCostQuota: null });
+    expect(checkBillingAccess(db, 'member', 'member', { agentId: 'agent-b', workspaceJid: workspace.jid })).toMatchObject({ allowed: false, blockType: 'quota_exceeded' });
   });
 });

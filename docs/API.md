@@ -45,6 +45,7 @@
 - `GET /api/billing/my/transactions`、`GET /api/billing/my/daily`：账务与每日汇总。
 - `POST /api/billing/my/redeem`：兑换余额、套餐或试用码。
 - `/api/billing/admin/*`：套餐、用户订阅、余额调整、兑换码、审计和计费设置；需要 `manage_billing`。
+- `GET /api/billing/admin/quotas`、`PUT/DELETE /api/billing/admin/quotas/:scopeType/:scopeId`：管理用户、Agent、Workspace 配额覆盖；需要 `manage_billing`。
 
 ## 错误约定
 

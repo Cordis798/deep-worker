@@ -199,7 +199,10 @@ export class RuntimeRunnerService {
           throw new Error('Runtime session not found');
         const owner = getUserById(this.db, inbox.ownerUserId);
         if (owner) {
-          const billingAccess = checkBillingAccess(this.db, owner.id, owner.role);
+          const billingAccess = checkBillingAccess(this.db, owner.id, owner.role, {
+            agentId: session.agent_profile_id,
+            workspaceJid: inbox.workspaceJid,
+          });
           if (!billingAccess.allowed) throw new Error(billingAccess.reason ?? '当前账户不可用');
         }
         usageAgentId = session.agent_profile_id;

@@ -44,4 +44,17 @@ describe('用量与计费 API', () => {
     expect(((await range.json()) as { window: { from: string; to: string } }).window.from).not.toBe(((await range7.json()) as { window: { from: string; to: string } }).window.from);
     await app.close();
   });
+
+  it('管理员可以配置并读取分级配额覆盖', async () => {
+    const app = createApp({ db: initDatabase(':memory:'), runner: new FakePiRunner() });
+    const { cookie } = await setup(app);
+    const saved = await app.request('/api/billing/admin/quotas/agent/agent-api', { method: 'PUT', headers: { cookie: `dw_session=${cookie}`, 'content-type': 'application/json' }, body: JSON.stringify({ dailyTokenQuota: 10 }) });
+    expect(saved.status).toBe(200);
+    expect(((await saved.json()) as { quota: { scopeType: string; dailyTokenQuota: number } }).quota).toMatchObject({ scopeType: 'agent', dailyTokenQuota: 10 });
+    const listed = await app.request('/api/billing/admin/quotas', { headers: { cookie: `dw_session=${cookie}` } });
+    expect(((await listed.json()) as { quotas: Array<{ scopeId: string }> }).quotas).toEqual(expect.arrayContaining([expect.objectContaining({ scopeId: 'agent-api' })]));
+    const removed = await app.request('/api/billing/admin/quotas/agent/agent-api', { method: 'DELETE', headers: { cookie: `dw_session=${cookie}` } });
+    expect(removed.status).toBe(200);
+    await app.close();
+  });
 });
