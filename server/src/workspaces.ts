@@ -11,6 +11,7 @@ export interface WorkspaceRow {
   name: string;
   agent_profile_id: string | null;
   status: string;
+  execution_mode: 'host' | 'container' | string;
   is_home: number;
   created_at: string;
   updated_at: string;
@@ -150,6 +151,7 @@ export function toWorkspacePublic(row: WorkspaceRow) {
     name: row.name,
     agent_profile_id: row.agent_profile_id,
     status: row.status,
+    execution_mode: row.execution_mode,
     is_home: row.is_home === 1,
     created_at: row.created_at,
     updated_at: row.updated_at,

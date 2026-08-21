@@ -18,6 +18,9 @@ import { createRunnerRoutes } from './routes/runner.js';
 import { createWorkspaceToolsRoutes } from './routes/workspace-tools.js';
 import { RuntimeRunnerService } from './runtime-runner-service.js';
 import { createCapabilityRoutes } from './routes/capabilities.js';
+import { createTaskRoutes } from './routes/tasks.js';
+import { createMemoryRoutes } from './routes/memory.js';
+import { TaskService } from './task-service.js';
 
 export type App = Hono<{ Variables: AppVariables }> & {
   close: () => Promise<void>;
@@ -29,6 +32,7 @@ export function createApp(
     db?: Database.Database;
     runner?: AgentRunner;
     runnerService?: RuntimeRunnerService;
+    taskService?: TaskService;
   } = {},
 ): App {
   const db = options.db ?? initDatabase(':memory:');
@@ -39,6 +43,7 @@ export function createApp(
       queueOptions: { maxAttempts: 1 },
     });
   const runnerService = options.runnerService ?? new RuntimeRunnerService({ db, runner });
+  const taskService = options.taskService ?? new TaskService({ db, runnerService });
   const app = new Hono<{ Variables: AppVariables }>();
   const nodeWebSocket = createNodeWebSocket({ app });
   const workspaceTools = createWorkspaceToolsRoutes(db, nodeWebSocket.upgradeWebSocket);
@@ -72,13 +77,17 @@ export function createApp(
   app.route('/api/workspaces', workspaceTools);
   app.route('/api/channel-accounts', createChannelAccountRoutes(db));
   app.route('/api/capabilities', createCapabilityRoutes(db));
+  app.route('/api/tasks', createTaskRoutes(taskService, db));
+  app.route('/api/workspaces', createMemoryRoutes(db));
 
   void runnerService.resumePending().catch((error) => {
     logger.error({ err: error }, 'Runner recovery failed');
   });
+  taskService.start();
   return Object.assign(app, {
     close: async () => {
       await workspaceTools.close();
+      await taskService.close();
       await runnerService.close();
     },
     injectWebSocket: nodeWebSocket.injectWebSocket,
