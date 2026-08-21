@@ -20,6 +20,8 @@ import { AgentProfilesPage } from './pages/AgentProfilesPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { MonitorPage } from './pages/MonitorPage.js';
 import { UsersPage } from './pages/UsersPage.js';
+import { TasksPage } from './pages/TasksPage.js';
+import { MemoryPage } from './pages/MemoryPage.js';
 
 const routes = createRoutesFromElements(
   <>
@@ -39,8 +41,8 @@ const routes = createRoutesFromElements(
       <Route path="/users" element={<AuthGuard requiredAnyPermissions={['manage_users', 'manage_invites', 'view_audit_log']}><UsersPage /></AuthGuard>} />
       <Route path="/capabilities/:section?" element={<CapabilitiesPage />} />
       <Route path="/agent-builder" element={<AgentBuilderPage />} />
-      <Route path="/tasks" element={<RoutePlaceholder title="任务" />} />
-      <Route path="/memory" element={<RoutePlaceholder title="记忆" />} />
+      <Route path="/tasks" element={<TasksPage />} />
+      <Route path="/memory" element={<MemoryPage />} />
       <Route path="/usage" element={<RoutePlaceholder title="用量" />} />
       <Route path="/billing" element={<RoutePlaceholder title="计费" />} />
       <Route path="/skills" element={<Navigate to="/capabilities/skills" replace />} />

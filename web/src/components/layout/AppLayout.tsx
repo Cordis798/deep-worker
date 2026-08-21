@@ -6,6 +6,8 @@ const navItems = [
   { to: '/agent-profiles', label: 'Agent', icon: '✦' },
   { to: '/files', label: '文件', icon: '▱' },
   { to: '/terminal', label: '终端', icon: '⌘' },
+  { to: '/tasks', label: '任务', icon: '◷' },
+  { to: '/memory', label: '记忆', icon: '◇' },
   { to: '/settings', label: '设置', icon: '⚙' },
 ];
 
