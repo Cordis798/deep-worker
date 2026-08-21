@@ -94,6 +94,7 @@ export interface UpdateTaskInput {
 }
 
 const MIN_INTERVAL_MS = 60_000;
+const MAX_NOTIFICATION_ATTEMPTS = 5;
 const CRON_FIELD_LIMITS = [
   [0, 59],
   [0, 23],
@@ -173,19 +174,28 @@ export function computeNextRunAt(
     }
     return new Date(from.getTime() + interval).toISOString();
   }
+  const fields = value.trim().split(/\s+/);
   const [minutes, hours, days, months, weekdays] = parseCron(value);
+  const dayIsWildcard = fields[2] === '*';
+  const weekdayIsWildcard = fields[4] === '*';
   const cursor = new Date(from.getTime());
   cursor.setUTCSeconds(0, 0);
   cursor.setUTCMinutes(cursor.getUTCMinutes() + 1);
   for (let i = 0; i < 1_100_000; i += 1) {
     const weekday = cursor.getUTCDay();
     const weekdayMatches = weekdays.has(weekday) || (weekday === 0 && weekdays.has(7));
+    const calendarMatches = dayIsWildcard && weekdayIsWildcard
+      ? true
+      : dayIsWildcard
+        ? weekdayMatches
+        : weekdayIsWildcard
+          ? days.has(cursor.getUTCDate())
+          : days.has(cursor.getUTCDate()) || weekdayMatches;
     if (
       minutes.has(cursor.getUTCMinutes()) &&
       hours.has(cursor.getUTCHours()) &&
-      days.has(cursor.getUTCDate()) &&
       months.has(cursor.getUTCMonth() + 1) &&
-      weekdayMatches
+      calendarMatches
     ) {
       return cursor.toISOString();
     }
@@ -345,9 +355,10 @@ export function stopTaskRun(db: Database.Database, ownerUserId: string, runId: s
   const now = nowIso();
   const result = db.prepare(
     `UPDATE task_runs SET status = 'stopped', error = '用户主动停止', completed_at = ?,
-      updated_at = ? WHERE id = ? AND status IN ('queued', 'running')
+      duration_ms = CASE WHEN started_at IS NULL THEN NULL ELSE MAX(0, CAST((julianday(?) - julianday(started_at)) * 86400000 AS INTEGER)) END,
+      notification_status = 'skipped', updated_at = ? WHERE id = ? AND status IN ('queued', 'running')
       AND task_id IN (SELECT id FROM scheduled_tasks WHERE owner_user_id = ?)`,
-  ).run(now, now, runId, ownerUserId);
+  ).run(now, now, now, runId, ownerUserId);
   return result.changes === 1;
 }
 
@@ -485,14 +496,34 @@ export function materializeDueTasks(
 }
 
 export function recoverExpiredRuns(db: Database.Database, now = new Date(), maxAttempts = 3): number {
-  const result = db.prepare(
-    `UPDATE task_runs SET status = CASE WHEN attempt >= ? THEN 'failed' ELSE 'queued' END,
-      error = CASE WHEN attempt >= ? THEN '执行租约过期，已达到重试上限' ELSE '执行租约过期，等待恢复' END,
-      retry_available_at = CASE WHEN attempt >= ? THEN NULL ELSE ? END,
-      lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-      WHERE status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`,
-  ).run(maxAttempts, maxAttempts, maxAttempts, now.toISOString(), now.toISOString(), now.toISOString());
-  return result.changes;
+  const nowText = now.toISOString();
+  const rows = db.prepare(
+    `SELECT id, attempt, started_at FROM task_runs
+     WHERE status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`,
+  ).all(nowText) as Array<{ id: string; attempt: number; started_at: string | null }>;
+  const update = db.prepare(
+    `UPDATE task_runs SET status = ?, error = ?, retry_available_at = ?,
+     completed_at = ?, duration_ms = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+     WHERE id = ? AND status = 'running'`,
+  );
+  db.transaction(() => {
+    for (const row of rows) {
+      const terminal = row.attempt >= maxAttempts;
+      const duration = terminal && row.started_at
+        ? Math.max(0, now.getTime() - new Date(row.started_at).getTime())
+        : null;
+      update.run(
+        terminal ? 'failed' : 'queued',
+        terminal ? '执行租约过期，已达到重试上限' : '执行租约过期，等待恢复',
+        terminal ? null : nowText,
+        terminal ? nowText : null,
+        duration,
+        nowText,
+        row.id,
+      );
+    }
+  })();
+  return rows.length;
 }
 
 export function claimNextRun(db: Database.Database, workerId: string, leaseMs: number): TaskRunRow | undefined {
@@ -539,13 +570,15 @@ export function completeRun(
 export function retryRun(db: Database.Database, runId: string, workerId: string, error: string, maxAttempts: number): boolean {
   const current = getRun(db, runId);
   if (!current) return false;
+  if (current.attempt >= maxAttempts) {
+    return !!completeRun(db, runId, workerId, 'failed', null, error);
+  }
   const retryAt = new Date(Date.now() + Math.min(30_000, 250 * 2 ** Math.max(0, current.attempt - 1))).toISOString();
   const result = db.prepare(
-    `UPDATE task_runs SET status = CASE WHEN attempt >= ? THEN 'failed' ELSE 'queued' END,
-      error = ?, retry_available_at = CASE WHEN attempt >= ? THEN NULL ELSE ? END,
+    `UPDATE task_runs SET status = 'queued', error = ?, retry_available_at = ?,
       lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
       WHERE id = ? AND status = 'running' AND lease_owner = ?`,
-  ).run(maxAttempts, error, maxAttempts, retryAt, nowIso(), runId, workerId);
+  ).run(error, retryAt, nowIso(), runId, workerId);
   return result.changes === 1;
 }
 
@@ -582,8 +615,9 @@ export function markNotification(
   const row = db.prepare('SELECT attempts FROM task_notifications WHERE id = ?').get(notificationId) as { attempts: number } | undefined;
   const attempts = (row?.attempts ?? 0) + 1;
   const retryAt = new Date(now.getTime() + Math.min(60_000, 1_000 * 2 ** Math.min(attempts - 1, 6))).toISOString();
+  const terminal = attempts >= MAX_NOTIFICATION_ATTEMPTS;
   db.transaction(() => {
-    db.prepare("UPDATE task_notifications SET status = 'pending', attempts = ?, next_attempt_at = ?, last_error = ?, updated_at = ? WHERE id = ?").run(attempts, retryAt, error ?? '通知失败', now.toISOString(), notificationId);
+    db.prepare("UPDATE task_notifications SET status = ?, attempts = ?, next_attempt_at = ?, last_error = ?, updated_at = ? WHERE id = ?").run(terminal ? 'failed' : 'pending', attempts, retryAt, error ?? '通知失败', now.toISOString(), notificationId);
     db.prepare("UPDATE task_runs SET notification_status = 'failed', updated_at = ? WHERE id = (SELECT run_id FROM task_notifications WHERE id = ?)").run(now.toISOString(), notificationId);
   })();
 }

@@ -172,11 +172,20 @@ export function deleteMemory(
   const current = getMemory(db, input.ownerUserId, input.workspaceJid, input.memoryId);
   if (!current || current.revision !== input.expectedRevision) throw new MemoryConflictError(current);
   const timestamp = now();
-  const result = db.prepare(
-    `UPDATE workspace_memories SET deleted_at = ?, revision = revision + 1, updated_at = ?
-     WHERE id = ? AND owner_user_id = ? AND workspace_jid = ? AND revision = ? AND deleted_at IS NULL`,
-  ).run(timestamp, timestamp, input.memoryId, input.ownerUserId, input.workspaceJid, input.expectedRevision);
-  return result.changes === 1;
+  return db.transaction(() => {
+    const result = db.prepare(
+      `UPDATE workspace_memories SET deleted_at = ?, revision = revision + 1, updated_at = ?
+       WHERE id = ? AND owner_user_id = ? AND workspace_jid = ? AND revision = ? AND deleted_at IS NULL`,
+    ).run(timestamp, timestamp, input.memoryId, input.ownerUserId, input.workspaceJid, input.expectedRevision);
+    if (result.changes !== 1) throw new MemoryConflictError(getMemory(db, input.ownerUserId, input.workspaceJid, input.memoryId));
+    const nextRevision = current.revision + 1;
+    db.prepare(
+      `INSERT INTO memory_revisions
+       (id, memory_id, revision, kind, title, content, source, content_hash, actor_user_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id('memory_revision'), current.id, nextRevision, current.kind, current.title, current.content, current.source, current.content_hash, input.ownerUserId, timestamp);
+    return true;
+  })();
 }
 
 export function listMemoryRevisions(

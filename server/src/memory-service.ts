@@ -100,6 +100,9 @@ export function updateWorkspaceMemory(
     throw new MemoryServiceError('invalid_request', 'expectedRevision 必须是正整数');
   }
   const patch = { ...input.patch };
+  if (!getMemory(db, input.ownerUserId, input.workspaceJid, input.memoryId)) {
+    throw new MemoryServiceError('not_found', '记忆不存在');
+  }
   if (patch.kind) validateKind(patch.kind);
   if (patch.title !== undefined) patch.title = validateText(patch.title, '记忆标题', MAX_TITLE_LENGTH);
   if (patch.content !== undefined) patch.content = validateText(patch.content, '记忆内容', MAX_CONTENT_LENGTH, true);
@@ -120,6 +123,9 @@ export function forgetWorkspaceMemory(
   input: { ownerUserId: string; workspaceJid: string; memoryId: string; expectedRevision: number },
 ): boolean {
   ensureWorkspace(db, input.ownerUserId, input.workspaceJid);
+  if (!getMemory(db, input.ownerUserId, input.workspaceJid, input.memoryId)) {
+    throw new MemoryServiceError('not_found', '记忆不存在');
+  }
   try {
     return deleteMemory(db, input);
   } catch (error) {
