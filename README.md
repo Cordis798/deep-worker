@@ -12,7 +12,6 @@
   <img alt="SQLite" src="https://img.shields.io/badge/Storage-SQLite-0F766E" />
 </p>
 
-![Deep Worker 初始化界面](docs/assets/setup-screen.png)
 
 ## 它解决什么问题
 
