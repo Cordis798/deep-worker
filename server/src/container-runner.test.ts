@@ -18,17 +18,33 @@ describe('容器运行器', () => {
         {
           cwd: workspace,
           sessionDir: session,
-          mounts: [{ hostPath: readonly, containerPath: '/workspace/reference', readonly: true }],
+          mounts: [
+            { hostPath: readonly, containerPath: '/workspace/reference', readonly: true },
+          ],
           limits: { memoryMb: 256, cpus: 0.5, pids: 64, tmpfsMb: 32 },
         },
         { image: 'test-image:latest', dockerCommand: 'docker' },
       );
       expect(result.command).toBe('docker');
-      expect(result.args).toEqual(expect.arrayContaining([
-        '--user', '1000:1000', '--read-only', '--network', 'none',
-        '--memory', '256m', '--cpus', '0.5', '--pids-limit', '64',
-        '--tmpfs', '/tmp:rw,noexec,nosuid,size=32m', 'test-image:latest',
-      ]));
+      expect(result.args.slice(0, 4)).toEqual(['run', '--rm', '--interactive', '--init']);
+      expect(result.args).toEqual(
+        expect.arrayContaining([
+          '--user',
+          '1000:1000',
+          '--read-only',
+          '--network',
+          'bridge',
+          '--memory',
+          '256m',
+          '--cpus',
+          '0.5',
+          '--pids-limit',
+          '64',
+          '--tmpfs',
+          '/tmp:rw,noexec,nosuid,size=32m',
+          'test-image:latest',
+        ]),
+      );
       expect(result.args.join(' ')).toContain('dst=/workspace/reference,readonly');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -42,12 +58,20 @@ describe('容器运行器', () => {
     fs.mkdirSync(workspace);
     fs.mkdirSync(session);
     try {
-      expect(() => buildContainerArgs({ cwd: workspace, sessionDir: session, mounts: [
-        { hostPath: workspace, containerPath: '/workspace', readonly: true },
-      ] })).toThrow('容器挂载目标重复');
-      expect(() => buildContainerArgs({ cwd: workspace, sessionDir: session, mounts: [
-        { hostPath: workspace, containerPath: '/workspace/../etc', readonly: true },
-      ] })).toThrow('容器挂载路径不安全');
+      expect(() =>
+        buildContainerArgs({
+          cwd: workspace,
+          sessionDir: session,
+          mounts: [{ hostPath: workspace, containerPath: '/workspace', readonly: true }],
+        }),
+      ).toThrow('容器挂载目标重复');
+      expect(() =>
+        buildContainerArgs({
+          cwd: workspace,
+          sessionDir: session,
+          mounts: [{ hostPath: workspace, containerPath: '/workspace/../etc', readonly: true }],
+        }),
+      ).toThrow('容器挂载路径不安全');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -61,14 +85,23 @@ describe('容器运行器', () => {
     fs.mkdirSync(session);
     let clientClosed = false;
     let model: string | undefined;
-    let clientOptions: { command?: string; args?: string[] } | undefined;
+    let clientOptions:
+      { command?: string; commandPrefixArgs?: string[]; env?: NodeJS.ProcessEnv } | undefined;
     const client = {
       start: async () => undefined,
-      close: async () => { clientClosed = true; },
+      close: async () => {
+        clientClosed = true;
+      },
       getState: async () => ({ sessionId: 'container-session' }),
-      setModel: async (provider: string, modelId: string) => { model = `${provider}/${modelId}`; return {}; },
+      setModel: async (provider: string, modelId: string) => {
+        model = `${provider}/${modelId}`;
+        return {};
+      },
       getLastAssistantText: async () => '容器回复',
-      promptAndWait: async (_message: string, options?: { onEvent?: (event: { type: string }) => void }) => {
+      promptAndWait: async (
+        _message: string,
+        options?: { onEvent?: (event: { type: string }) => void },
+      ) => {
         options?.onEvent?.({ type: 'agent_settled' });
         return [{ type: 'agent_settled' }];
       },
@@ -87,12 +120,47 @@ describe('容器运行器', () => {
         message: '执行容器任务',
         cwd: workspace,
         sessionDir: session,
-        provider: { provider: 'openai', modelId: 'test-model', hash: 'provider-hash' },
+        provider: {
+          provider: 'openai',
+          modelId: 'test-model',
+          hash: 'provider-hash',
+          env: { OPENAI_API_KEY: 'secret-value' },
+          modelConfig: {
+            baseUrl: 'https://example.test/v1',
+            api: 'openai-completions',
+            apiKeyEnv: 'OPENAI_API_KEY',
+          },
+        },
       });
       expect(result.reply).toBe('容器回复');
       expect(model).toBe('openai/test-model');
       expect(clientOptions?.command).toBe('docker');
-      expect(clientOptions?.args).toContain('test-image:latest');
+      expect(clientOptions?.commandPrefixArgs).toEqual(
+        expect.arrayContaining(['run', 'test-image:latest', 'pi']),
+      );
+      expect(clientOptions?.commandPrefixArgs?.slice(-2)).toEqual(['test-image:latest', 'pi']);
+      expect(clientOptions?.commandPrefixArgs).toEqual(
+        expect.arrayContaining([
+          '--env',
+          'OPENAI_API_KEY',
+          '--env',
+          'PI_CODING_AGENT_DIR',
+          '--env',
+          'PI_OFFLINE',
+        ]),
+      );
+      expect(clientOptions?.commandPrefixArgs).not.toContain('secret-value');
+      expect(clientOptions?.env).toMatchObject({
+        OPENAI_API_KEY: 'secret-value',
+        PI_CODING_AGENT_DIR: '/session/pi-config',
+        PI_OFFLINE: '1',
+      });
+      const modelsJson = fs.readFileSync(
+        path.join(session, 'pi-config', 'models.json'),
+        'utf8',
+      );
+      expect(modelsJson).toContain('$OPENAI_API_KEY');
+      expect(modelsJson).not.toContain('secret-value');
       await runner.close();
       expect(clientClosed).toBe(true);
     } finally {
@@ -109,13 +177,24 @@ describe('容器运行器', () => {
     let clientClosed = false;
     const client = {
       start: async () => undefined,
-      close: async () => { clientClosed = true; },
+      close: async () => {
+        clientClosed = true;
+      },
       getState: async () => ({ sessionId: 'container-session' }),
-      promptAndWait: async () => { throw new Error('Pi RPC 超时'); },
+      promptAndWait: async () => {
+        throw new Error('Pi RPC 超时');
+      },
     };
     try {
       const runner = new ContainerRunner({ spawnClient: () => client });
-      await expect(runner.run({ sessionId: 'failed-session', message: '失败任务', cwd: workspace, sessionDir: session })).rejects.toThrow('Pi RPC 超时');
+      await expect(
+        runner.run({
+          sessionId: 'failed-session',
+          message: '失败任务',
+          cwd: workspace,
+          sessionDir: session,
+        }),
+      ).rejects.toThrow('Pi RPC 超时');
       expect(clientClosed).toBe(true);
       expect(runner.size()).toBe(0);
     } finally {

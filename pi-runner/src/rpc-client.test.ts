@@ -40,6 +40,13 @@ class MockProcess extends EventEmitter implements RpcProcessLike {
     return true;
   }
 
+  fail(code: number, stderr: string): void {
+    this.stderr.write(stderr);
+    this.stderr.end();
+    this.exitCode = code;
+    queueMicrotask(() => this.emit('exit', code, null));
+  }
+
   private write(value: unknown): void {
     this.stdout.write(`${JSON.stringify(value)}\n`);
   }
@@ -87,8 +94,14 @@ class MockProcess extends EventEmitter implements RpcProcessLike {
             success: true,
           });
           const finishPrompt = () => {
-            this.write({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hello' } });
-            this.write({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } });
+            this.write({
+              type: 'message_update',
+              assistantMessageEvent: { type: 'text_delta', delta: 'hello' },
+            });
+            this.write({
+              type: 'message_end',
+              message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+            });
             this.write({ type: 'agent_settled' });
           };
           if (this.responseDelayMs > 0) setTimeout(finishPrompt, this.responseDelayMs);
@@ -105,8 +118,7 @@ class MockProcess extends EventEmitter implements RpcProcessLike {
     };
     if (this.responseDelayMs > 0 && command.type !== 'prompt' && command.type !== 'abort') {
       setTimeout(response, this.responseDelayMs);
-    }
-    else response();
+    } else response();
   }
 }
 
@@ -149,9 +161,7 @@ describe('PiRpcClient', () => {
   it('aborts an in-flight operation when the settle timeout expires', async () => {
     const { client, process } = makeClient({ responseDelayMs: 1_000 });
     await client.start();
-    await expect(client.promptAndWait('slow', { timeoutMs: 5 })).rejects.toThrow(
-      /timed out/i,
-    );
+    await expect(client.promptAndWait('slow', { timeoutMs: 5 })).rejects.toThrow(/timed out/i);
     expect(process.abortCount).toBeGreaterThanOrEqual(1);
     await client.close();
   });
@@ -160,6 +170,48 @@ describe('PiRpcClient', () => {
     const { client } = makeClient({ responseDelayMs: 100 });
     await client.start();
     await expect(client.getState()).rejects.toThrow(/timed out/i);
+    await client.close();
+  });
+
+  it('在进程退出错误中保留脱敏后的 stderr 诊断', async () => {
+    const { client, process } = makeClient();
+    const started = client.start();
+    process.fail(125, 'failed to connect to the docker API\napi_key=should-not-leak\n');
+
+    await expect(started).rejects.toThrow(
+      'Pi RPC process exited (code=125, signal=null): failed to connect to the docker API api_key=[REDACTED]',
+    );
+  });
+
+  it('将包装命令参数放在 Pi RPC 参数之前', async () => {
+    const process = new MockProcess();
+    processes.push(process);
+    let spawnedArgs: string[] = [];
+    const client = new PiRpcClient({
+      command: 'docker',
+      commandPrefixArgs: ['run', '--rm', 'deep-worker-pi:latest', 'pi'],
+      cwd: 'C:\\workspace',
+      noSession: true,
+      startupTimeoutMs: 1,
+      spawnProcess: (_command, args) => {
+        spawnedArgs = args;
+        return process;
+      },
+    });
+
+    await client.start();
+
+    expect(spawnedArgs).toEqual([
+      'run',
+      '--rm',
+      'deep-worker-pi:latest',
+      'pi',
+      '--mode',
+      'rpc',
+      '--no-session',
+      '--tools',
+      'bash',
+    ]);
     await client.close();
   });
 });

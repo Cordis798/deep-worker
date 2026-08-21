@@ -21,10 +21,13 @@ Deep Worker 面向需要自托管 Agent 工作台的团队：一个用户可以�
 
 ## 快速启动
 
-需要 Node.js 20+。
+需要 Node.js 20+。普通成员的 Workspace 默认使用 Docker Container Runner；Windows 需要先启用 WSL 2 和“虚拟机平台”，并启动 Docker Desktop。
 
 ```bash
 npm install
+
+# 构建普通成员执行 Pi RPC 所需的最小镜像
+npm run container:build
 
 # 无需 API Key 的本地演示：使用确定性的 Fake Pi Runner
 DEEP_WORKER_RUNNER=fake npm run dev -w server
@@ -41,6 +44,8 @@ npm run dev -w server
 ```
 
 打开 [http://127.0.0.1:5173/setup](http://127.0.0.1:5173/setup) 创建首个管理员。服务端默认使用真实 Pi Runner；生产环境不设置 `DEEP_WORKER_RUNNER=fake`，并确保 `pi --mode rpc` 可执行且 Provider 凭据已配置。若只启动后端，API 地址为 [http://127.0.0.1:3000](http://127.0.0.1:3000)。
+
+Container Runner 会为每个会话生成独立的 Pi `models.json`，其中只保存 API Key 环境变量引用；真实密钥仍由服务端解密后注入进程。容器默认通过 Docker bridge 网络访问已配置的模型接口。若看到 Docker `code=125`，先运行 `docker desktop status` 和 `docker image inspect deep-worker-pi:latest` 检查引擎与镜像。
 
 ## 核心能力
 

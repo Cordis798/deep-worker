@@ -3,7 +3,14 @@ import path from 'node:path';
 import { PiRpcClient, type PiRpcClientOptions } from './rpc-client.js';
 import type { PromptAndWaitOptions } from './rpc-client.js';
 import type { RpcEvent } from './rpc-types.js';
-import { materializePiCapabilities, type PiCapabilityInjection } from './capability-injection.js';
+import {
+  materializePiCapabilities,
+  type PiCapabilityInjection,
+} from './capability-injection.js';
+import {
+  materializePiProviderConfig,
+  type PiProviderConfigSelection,
+} from './provider-config.js';
 
 export interface SessionStateLike {
   sessionId: string;
@@ -28,6 +35,7 @@ export interface SessionConfig {
   identityHash?: string;
   capabilityHash?: string;
   providerHash?: string;
+  provider?: PiProviderConfigSelection;
   env?: NodeJS.ProcessEnv;
   capabilities?: PiCapabilityInjection;
 }
@@ -90,6 +98,7 @@ export class PiSessionManager {
     const capabilityFiles = config.capabilities
       ? materializePiCapabilities(config.capabilities, sessionRoot)
       : undefined;
+    const providerConfigDir = await materializePiProviderConfig(config.provider, sessionRoot);
     const client = (
       this.options.createClient ?? ((clientOptions) => new PiRpcClient(clientOptions))
     )({
@@ -104,6 +113,7 @@ export class PiSessionManager {
               PI_RUNNER_SKILLS_DIR: capabilityFiles.skillsDir,
             }
           : {}),
+        ...(providerConfigDir ? { PI_CODING_AGENT_DIR: providerConfigDir } : {}),
       },
       tools: ['bash'],
     });

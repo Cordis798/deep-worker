@@ -36,6 +36,7 @@ export type RpcSpawnProcess = (
 
 export interface PiRpcClientOptions {
   command?: string;
+  commandPrefixArgs?: string[];
   args?: string[];
   cwd: string;
   env?: NodeJS.ProcessEnv;
@@ -86,6 +87,17 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
+function sanitizeProcessStderr(value: string): string {
+  return value
+    .replace(
+      /\b(api[_-]?key|authorization|password|secret|token)\s*[:=]\s*\S+/gi,
+      '$1=[REDACTED]',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(-1_000);
+}
+
 export class PiRpcClient {
   private readonly options: Required<
     Pick<PiRpcClientOptions, 'requestTimeoutMs' | 'startupTimeoutMs' | 'killTimeoutMs'>
@@ -114,6 +126,7 @@ export class PiRpcClient {
   async start(): Promise<void> {
     if (this.process) throw new Error('Pi RPC client is already started');
     this.processError = null;
+    this.stderrTail = '';
     this.closing = false;
     const args = this.buildArgs();
     let child: RpcProcessLike;
@@ -269,7 +282,7 @@ export class PiRpcClient {
   }
 
   private buildArgs(): string[] {
-    const args = ['--mode', 'rpc'];
+    const args = [...(this.options.commandPrefixArgs ?? []), '--mode', 'rpc'];
     if (this.options.noSession) args.push('--no-session');
     else if (this.options.sessionFile) args.push('--session', this.options.sessionFile);
     else if (this.options.sessionDir) args.push('--session-dir', this.options.sessionDir);
@@ -341,8 +354,9 @@ export class PiRpcClient {
   }
 
   private exitError(code: number | null, signal: NodeJS.Signals | null): Error {
+    const detail = sanitizeProcessStderr(this.stderrTail);
     return new Error(
-      `Pi RPC process exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`,
+      `Pi RPC process exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})${detail ? `: ${detail}` : ''}`,
     );
   }
 

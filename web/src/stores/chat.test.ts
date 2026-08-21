@@ -11,12 +11,14 @@ const { post, openTurnStream } = vi.hoisted(() => {
     ) => {
       queueMicrotask(() => {
         handlers.onEvent({ eventType: 'init', statusText: 'agent started' });
+        handlers.onEvent({ eventType: 'status', statusText: 'turn_start' });
         handlers.onEvent({
           eventType: 'tool_use_start',
           toolName: 'bash',
           toolUseId: 'tool-1',
         });
         handlers.onEvent({ eventType: 'text_delta', text: '你好' });
+        handlers.onEvent({ eventType: 'status', statusText: 'turn_end' });
         handlers.onEvent({ eventType: 'status', statusText: 'agent settled' });
       });
       return { close: vi.fn() };
@@ -51,8 +53,10 @@ describe('聊天流状态', () => {
     expect(messages[1]?.text).toBe('你好');
     expect(messages[1]?.events.map((event) => event.eventType)).toEqual([
       'init',
+      'status',
       'tool_use_start',
       'text_delta',
+      'status',
       'status',
     ]);
     expect(messages[1]?.status).toBe('complete');

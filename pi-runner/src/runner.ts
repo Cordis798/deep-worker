@@ -6,6 +6,7 @@ import { SessionQueue, type SessionQueueOptions } from './session-queue.js';
 import { mapPiEvent } from './stream-events.js';
 import type { RpcEvent } from './rpc-types.js';
 import type { PiCapabilityInjection } from './capability-injection.js';
+import type { PiProviderModelConfig } from './provider-config.js';
 
 export interface AgentRunRequest {
   ownerUserId?: string;
@@ -33,6 +34,7 @@ export interface PiProviderSelection {
   modelId: string;
   env?: NodeJS.ProcessEnv;
   hash?: string;
+  modelConfig?: PiProviderModelConfig;
 }
 
 export interface AgentRunResult {
@@ -91,6 +93,7 @@ export class PiRunner implements AgentRunner {
       capabilityHash: request.capabilityHash,
       capabilities: request.capabilities,
       providerHash: request.provider?.hash,
+      provider: request.provider,
       env: request.provider?.env,
     };
     const prompt = assemblePrompt({
@@ -103,7 +106,9 @@ export class PiRunner implements AgentRunner {
             hash: request.capabilities.hash,
             skills: request.capabilities.skills.map((skill) => skill.name),
             mcpServers: request.capabilities.mcpServers.map((server) => server.name),
-            plugins: request.capabilities.plugins.filter((plugin) => plugin.enabled).map((plugin) => plugin.name),
+            plugins: request.capabilities.plugins
+              .filter((plugin) => plugin.enabled)
+              .map((plugin) => plugin.name),
           }
         : undefined,
     });

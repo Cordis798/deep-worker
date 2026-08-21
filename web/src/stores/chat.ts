@@ -108,7 +108,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               const isFailure =
                 event.eventType === 'status' && event.statusText === 'agent failed';
               const isTerminal =
-                event.eventType === 'status' && event.statusText !== 'agent started';
+                event.eventType === 'status' &&
+                (event.statusText === 'agent settled' || event.statusText === 'agent failed');
               if (isTerminal) terminal = true;
               if (isFailure) {
                 failureMessage = event.detail ?? event.summary ?? 'Pi Agent 执行失败';

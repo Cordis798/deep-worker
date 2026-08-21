@@ -18,6 +18,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "dev": "npm run dev -w server",
+    "container:build": "docker build -t deep-worker-pi:latest -f container/Dockerfile .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

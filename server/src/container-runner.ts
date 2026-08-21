@@ -11,6 +11,7 @@ import { PiRpcClient } from '@deep-worker/pi-runner';
 import { extractFinalReply } from '@deep-worker/pi-runner';
 import { assemblePrompt } from '@deep-worker/pi-runner';
 import { mapPiEvent } from '@deep-worker/pi-runner';
+import { materializePiProviderConfig } from '@deep-worker/pi-runner';
 import type { RpcEvent } from '@deep-worker/pi-runner';
 import { DATA_DIR } from './config.js';
 
@@ -32,7 +33,10 @@ export interface ContainerRunnerOptions {
   dockerCommand?: string;
   defaultLimits?: Partial<ContainerLimits>;
   spawnClient?: (options: ConstructorParameters<typeof PiRpcClient>[0]) => SessionClient;
-  validateAdditionalMounts?: (ownerUserId: string | undefined, mounts: readonly ContainerMount[]) => ContainerMount[];
+  validateAdditionalMounts?: (
+    ownerUserId: string | undefined,
+    mounts: readonly ContainerMount[],
+  ) => ContainerMount[];
 }
 
 interface ManagedContainerSession {
@@ -60,9 +64,15 @@ function safeHostPath(value: string, field: string): string {
 }
 
 function safeContainerPath(value: string): string {
-  if (!value.startsWith('/') || value.includes('\0')) throw new Error('容器挂载路径必须是绝对路径');
+  if (!value.startsWith('/') || value.includes('\0'))
+    throw new Error('容器挂载路径必须是绝对路径');
   const normalized = path.posix.normalize(value);
-  if (normalized !== value || normalized === '/' || normalized.startsWith('/proc') || normalized.startsWith('/sys')) {
+  if (
+    normalized !== value ||
+    normalized === '/' ||
+    normalized.startsWith('/proc') ||
+    normalized.startsWith('/sys')
+  ) {
     throw new Error('容器挂载路径不安全');
   }
   return normalized;
@@ -80,8 +90,14 @@ export function validateContainerMounts(mounts: readonly ContainerMount[]): Cont
 }
 
 export function buildContainerArgs(
-  request: Pick<AgentRunRequest, 'cwd' | 'sessionDir'> & { mounts?: readonly ContainerMount[]; limits?: Partial<ContainerLimits> },
-  options: Pick<ContainerRunnerOptions, 'image' | 'dockerCommand'> & { limits?: Partial<ContainerLimits> } = {},
+  request: Pick<AgentRunRequest, 'cwd' | 'sessionDir'> & {
+    mounts?: readonly ContainerMount[];
+    limits?: Partial<ContainerLimits>;
+    envNames?: readonly string[];
+  },
+  options: Pick<ContainerRunnerOptions, 'image' | 'dockerCommand'> & {
+    limits?: Partial<ContainerLimits>;
+  } = {},
 ): { command: string; args: string[]; limits: ContainerLimits } {
   const limits = { ...DEFAULT_LIMITS, ...options.limits, ...request.limits };
   const memoryMb = positiveNumber(limits.memoryMb, '容器内存限制');
@@ -89,22 +105,55 @@ export function buildContainerArgs(
   const pids = positiveNumber(limits.pids, '容器进程数限制');
   const tmpfsMb = positiveNumber(limits.tmpfsMb, '容器临时目录限制');
   const cwd = safeHostPath(request.cwd ?? process.cwd(), '工作区路径');
-  const sessionDir = safeHostPath(request.sessionDir ?? path.join(DATA_DIR, 'container-sessions'), '会话目录');
+  const sessionDir = safeHostPath(
+    request.sessionDir ?? path.join(DATA_DIR, 'container-sessions'),
+    '会话目录',
+  );
   const mounts = validateContainerMounts([
     { hostPath: cwd, containerPath: '/workspace', readonly: false },
     { hostPath: sessionDir, containerPath: '/session', readonly: false },
     ...(request.mounts ?? []),
   ]);
   const args = [
-    'run', '--rm', '--init', '--user', '1000:1000', '--read-only',
-    '--network', 'none', '--memory', `${memoryMb}m`, '--cpus', String(cpus),
-    '--pids-limit', String(Math.floor(pids)), '--tmpfs', `/tmp:rw,noexec,nosuid,size=${tmpfsMb}m`,
+    'run',
+    '--rm',
+    '--interactive',
+    '--init',
+    '--user',
+    '1000:1000',
+    '--read-only',
+    '--network',
+    'bridge',
+    '--memory',
+    `${memoryMb}m`,
+    '--cpus',
+    String(cpus),
+    '--pids-limit',
+    String(Math.floor(pids)),
+    '--tmpfs',
+    `/tmp:rw,noexec,nosuid,size=${tmpfsMb}m`,
   ];
-  for (const mount of mounts) {
-    args.push('--mount', `type=bind,src=${mount.hostPath},dst=${mount.containerPath}${mount.readonly ? ',readonly' : ''}`);
+  for (const envName of new Set(request.envNames ?? [])) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(envName)) {
+      throw new Error(`容器环境变量名不安全：${envName}`);
+    }
+    // 只把变量名交给 Docker，变量值从 Docker 客户端进程环境继承，避免密钥出现在命令参数中。
+    args.push('--env', envName);
   }
-  args.push(options.image ?? process.env.DEEP_WORKER_CONTAINER_IMAGE ?? 'deep-worker-pi:latest');
-  return { command: options.dockerCommand ?? process.env.DEEP_WORKER_DOCKER_COMMAND ?? 'docker', args, limits: { memoryMb, cpus, pids, tmpfsMb } };
+  for (const mount of mounts) {
+    args.push(
+      '--mount',
+      `type=bind,src=${mount.hostPath},dst=${mount.containerPath}${mount.readonly ? ',readonly' : ''}`,
+    );
+  }
+  args.push(
+    options.image ?? process.env.DEEP_WORKER_CONTAINER_IMAGE ?? 'deep-worker-pi:latest',
+  );
+  return {
+    command: options.dockerCommand ?? process.env.DEEP_WORKER_DOCKER_COMMAND ?? 'docker',
+    args,
+    limits: { memoryMb, cpus, pids, tmpfsMb },
+  };
 }
 
 function providerEnvironment(request: AgentRunRequest): NodeJS.ProcessEnv {
@@ -113,13 +162,16 @@ function providerEnvironment(request: AgentRunRequest): NodeJS.ProcessEnv {
 
 /** 通过 Docker 运行 Pi RPC；容器失败时不会静默降级为 Host。 */
 export class ContainerRunner implements AgentRunner {
-  private readonly options: Required<Pick<ContainerRunnerOptions, 'image' | 'dockerCommand'>> & ContainerRunnerOptions;
+  private readonly options: Required<Pick<ContainerRunnerOptions, 'image' | 'dockerCommand'>> &
+    ContainerRunnerOptions;
   private readonly sessions = new Map<string, ManagedContainerSession>();
 
   constructor(options: ContainerRunnerOptions = {}) {
     this.options = {
-      image: options.image ?? process.env.DEEP_WORKER_CONTAINER_IMAGE ?? 'deep-worker-pi:latest',
-      dockerCommand: options.dockerCommand ?? process.env.DEEP_WORKER_DOCKER_COMMAND ?? 'docker',
+      image:
+        options.image ?? process.env.DEEP_WORKER_CONTAINER_IMAGE ?? 'deep-worker-pi:latest',
+      dockerCommand:
+        options.dockerCommand ?? process.env.DEEP_WORKER_DOCKER_COMMAND ?? 'docker',
       ...options,
     };
   }
@@ -136,16 +188,18 @@ export class ContainerRunner implements AgentRunner {
             hash: request.capabilities.hash,
             skills: request.capabilities.skills.map((skill) => skill.name),
             mcpServers: request.capabilities.mcpServers.map((server) => server.name),
-            plugins: request.capabilities.plugins.filter((plugin) => plugin.enabled).map((plugin) => plugin.name),
+            plugins: request.capabilities.plugins
+              .filter((plugin) => plugin.enabled)
+              .map((plugin) => plugin.name),
           }
         : undefined,
     });
     const rawEvents: RpcEvent[] = [];
     const events = [] as AgentRunResult['events'];
-    if (request.provider && session.client.setModel) {
-      await session.client.setModel(request.provider.provider, request.provider.modelId);
-    }
     try {
+      if (request.provider && session.client.setModel) {
+        await session.client.setModel(request.provider.provider, request.provider.modelId);
+      }
       const completed = await session.client.promptAndWait?.(prompt, {
         timeoutMs: request.timeoutMs,
         onEvent: (rawEvent) => {
@@ -161,7 +215,8 @@ export class ContainerRunner implements AgentRunner {
         },
       });
       if (!completed) throw new Error('容器 Pi 会话不支持 prompt');
-      const reply = extractFinalReply(rawEvents) || (await session.client.getLastAssistantText?.()) || '';
+      const reply =
+        extractFinalReply(rawEvents) || (await session.client.getLastAssistantText?.()) || '';
       session.lastUsedAt = Date.now();
       return { sessionId: request.sessionId, reply, events, attempts: 1 };
     } catch (error) {
@@ -193,20 +248,45 @@ export class ContainerRunner implements AgentRunner {
       await existing.client.close();
       this.sessions.delete(request.sessionId);
     }
-    const sessionDir = path.resolve(request.sessionDir ?? path.join(DATA_DIR, 'container-sessions', request.sessionId));
-    fs.mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
-    const additionalMounts = request.containerMounts && this.options.validateAdditionalMounts
-      ? this.options.validateAdditionalMounts(request.ownerUserId, request.containerMounts)
-      : request.containerMounts;
-    const built = buildContainerArgs(
-      { cwd: request.cwd, sessionDir, mounts: additionalMounts, limits: request.containerLimits },
-      { image: this.options.image, dockerCommand: this.options.dockerCommand, limits: this.options.defaultLimits },
+    const sessionDir = path.resolve(
+      request.sessionDir ?? path.join(DATA_DIR, 'container-sessions', request.sessionId),
     );
-    const client = (this.options.spawnClient ?? ((clientOptions) => new PiRpcClient(clientOptions)))({
+    fs.mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+    const providerConfigDir = await materializePiProviderConfig(request.provider, sessionDir);
+    const containerEnv = {
+      ...(request.provider?.env ?? {}),
+      ...(providerConfigDir
+        ? { PI_CODING_AGENT_DIR: '/session/pi-config', PI_OFFLINE: '1' }
+        : {}),
+    };
+    const additionalMounts =
+      request.containerMounts && this.options.validateAdditionalMounts
+        ? this.options.validateAdditionalMounts(request.ownerUserId, request.containerMounts)
+        : request.containerMounts;
+    const built = buildContainerArgs(
+      {
+        cwd: request.cwd,
+        sessionDir,
+        mounts: additionalMounts,
+        limits: request.containerLimits,
+        envNames: Object.keys(containerEnv),
+      },
+      {
+        image: this.options.image,
+        dockerCommand: this.options.dockerCommand,
+        limits: this.options.defaultLimits,
+      },
+    );
+    const client = (
+      this.options.spawnClient ?? ((clientOptions) => new PiRpcClient(clientOptions))
+    )({
       command: built.command,
-      args: built.args,
+      commandPrefixArgs: [...built.args, 'pi'],
       cwd: process.cwd(),
-      env: providerEnvironment(request),
+      env: {
+        ...providerEnvironment(request),
+        ...containerEnv,
+      },
       sessionDir: '/session',
       tools: ['bash'],
       requestTimeoutMs: 30_000,
