@@ -98,11 +98,18 @@ describe('sqlite migration framework', () => {
         .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runner_outbox'")
         .get(),
     ).toBeTruthy();
-    for (const table of ['skills', 'mcp_servers', 'plugins_catalog', 'agent_builder_drafts']) {
+    for (const table of [
+      'skills', 'mcp_servers', 'plugins_catalog', 'agent_builder_drafts',
+      'scheduled_tasks', 'task_runs', 'task_notifications',
+      'workspace_memories', 'memory_revisions',
+    ]) {
       expect(
         db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),
       ).toBeTruthy();
     }
+    expect(
+      db.prepare("SELECT 1 FROM pragma_table_info('workspaces') WHERE name = 'execution_mode'").get(),
+    ).toBeTruthy();
     db.close();
   });
 

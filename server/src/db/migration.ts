@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 export class MigrationError extends Error {}
 
@@ -422,6 +422,124 @@ function createCapabilityTables(db: Database.Database): void {
   `);
 }
 
+function createTaskMemoryTables(db: Database.Database): void {
+  db.exec(`
+    ALTER TABLE workspaces ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'host';
+
+    CREATE TABLE IF NOT EXISTS scheduled_tasks (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL,
+      workspace_jid TEXT NOT NULL,
+      name TEXT NOT NULL,
+      execution_type TEXT NOT NULL CHECK (execution_type IN ('agent', 'script')),
+      schedule_type TEXT NOT NULL CHECK (schedule_type IN ('cron', 'interval', 'once')),
+      schedule_value TEXT NOT NULL,
+      prompt TEXT NOT NULL DEFAULT '',
+      script_command TEXT,
+      context_mode TEXT NOT NULL DEFAULT 'isolated' CHECK (context_mode IN ('group', 'isolated')),
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'completed', 'deleted')),
+      next_run_at TEXT,
+      last_run_at TEXT,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted_at TEXT,
+      FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_due
+      ON scheduled_tasks(status, next_run_at);
+    CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_owner
+      ON scheduled_tasks(owner_user_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS task_runs (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      idempotency_key TEXT,
+      occurrence_key TEXT NOT NULL UNIQUE,
+      trigger_type TEXT NOT NULL CHECK (trigger_type IN ('scheduled', 'manual', 'recovery')),
+      scheduled_for TEXT NOT NULL,
+      definition_snapshot TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'missed', 'stopped')),
+      attempt INTEGER NOT NULL DEFAULT 0,
+      retry_available_at TEXT,
+      lease_owner TEXT,
+      lease_expires_at TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      duration_ms INTEGER,
+      result_text TEXT,
+      error TEXT,
+      notification_status TEXT NOT NULL DEFAULT 'pending' CHECK (notification_status IN ('pending', 'delivered', 'failed', 'skipped')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_task_runs_idempotency
+      ON task_runs(task_id, idempotency_key)
+      WHERE idempotency_key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_task_runs_ready
+      ON task_runs(status, lease_expires_at, created_at);
+    CREATE INDEX IF NOT EXISTS idx_task_runs_task
+      ON task_runs(task_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS task_notifications (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'failed')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      last_error TEXT,
+      delivered_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (run_id) REFERENCES task_runs(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_notifications_ready
+      ON task_notifications(status, next_attempt_at);
+
+    CREATE TABLE IF NOT EXISTS workspace_memories (
+      id TEXT PRIMARY KEY,
+      workspace_jid TEXT NOT NULL,
+      owner_user_id TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('fact', 'decision', 'experience', 'follow_up')),
+      title TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'web_user',
+      revision INTEGER NOT NULL DEFAULT 1,
+      content_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted_at TEXT,
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE,
+      FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_memories_scope
+      ON workspace_memories(workspace_jid, deleted_at, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_workspace_memories_kind
+      ON workspace_memories(workspace_jid, kind, deleted_at);
+
+    CREATE TABLE IF NOT EXISTS memory_revisions (
+      id TEXT PRIMARY KEY,
+      memory_id TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      source TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      actor_user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(memory_id, revision),
+      FOREIGN KEY (memory_id) REFERENCES workspace_memories(id) ON DELETE CASCADE,
+      FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_revisions_memory
+      ON memory_revisions(memory_id, revision DESC);
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
@@ -430,6 +548,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 5, name: 'runner_reliability_tables', up: createRunnerReliabilityTables },
   { version: 6, name: 'channel_reliability_tables', up: createChannelReliabilityTables },
   { version: 7, name: 'capability_tables', up: createCapabilityTables },
+  { version: 8, name: 'task_memory_tables', up: createTaskMemoryTables },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {
