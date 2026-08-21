@@ -103,6 +103,9 @@ describe('sqlite migration framework', () => {
       'scheduled_tasks', 'task_runs', 'task_notifications',
       'workspace_memories', 'memory_revisions',
       'provider_configs',
+      'billing_plans', 'user_subscriptions', 'user_balances', 'balance_transactions',
+      'monthly_usage', 'daily_usage', 'redeem_codes', 'redeem_code_usage',
+      'billing_audit_log', 'usage_events', 'usage_event_models', 'usage_daily_summary',
     ]) {
       expect(
         db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),

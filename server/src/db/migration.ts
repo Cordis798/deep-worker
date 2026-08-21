@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 10;
+export const CURRENT_SCHEMA_VERSION = 11;
 
 export class MigrationError extends Error {}
 
@@ -574,6 +574,220 @@ function createProviderTables(db: Database.Database): void {
   `);
 }
 
+function createUsageBillingTables(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS billing_plans (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      tier INTEGER NOT NULL DEFAULT 0,
+      monthly_cost_usd REAL NOT NULL DEFAULT 0,
+      monthly_token_quota INTEGER,
+      monthly_cost_quota REAL,
+      daily_token_quota INTEGER,
+      daily_cost_quota REAL,
+      weekly_token_quota INTEGER,
+      weekly_cost_quota REAL,
+      rate_multiplier REAL NOT NULL DEFAULT 1,
+      trial_days INTEGER,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      display_price TEXT,
+      highlight INTEGER NOT NULL DEFAULT 0,
+      max_groups INTEGER,
+      max_concurrent_containers INTEGER,
+      max_im_channels INTEGER,
+      max_mcp_servers INTEGER,
+      max_storage_mb INTEGER,
+      allow_overage INTEGER NOT NULL DEFAULT 0,
+      features_json TEXT NOT NULL DEFAULT '[]',
+      is_default INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_plans_default
+      ON billing_plans(is_default) WHERE is_default = 1;
+
+    CREATE TABLE IF NOT EXISTS user_subscriptions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      plan_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('active', 'cancelled', 'expired')),
+      started_at TEXT NOT NULL,
+      expires_at TEXT,
+      cancelled_at TEXT,
+      trial_ends_at TEXT,
+      notes TEXT,
+      auto_renew INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (plan_id) REFERENCES billing_plans(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_status
+      ON user_subscriptions(user_id, status, started_at DESC);
+
+    CREATE TABLE IF NOT EXISTS user_balances (
+      user_id TEXT PRIMARY KEY,
+      balance_usd REAL NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS balance_transactions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      amount_usd REAL NOT NULL,
+      balance_after REAL NOT NULL,
+      source TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      reference_id TEXT,
+      idempotency_key TEXT UNIQUE,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_balance_transactions_user_created
+      ON balance_transactions(user_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS monthly_usage (
+      user_id TEXT NOT NULL,
+      month TEXT NOT NULL,
+      total_input_tokens INTEGER NOT NULL DEFAULT 0,
+      total_output_tokens INTEGER NOT NULL DEFAULT 0,
+      total_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      total_cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+      total_reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+      total_cost_usd REAL NOT NULL DEFAULT 0,
+      message_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, month),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_usage (
+      user_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      total_input_tokens INTEGER NOT NULL DEFAULT 0,
+      total_output_tokens INTEGER NOT NULL DEFAULT 0,
+      total_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      total_cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+      total_reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+      total_cost_usd REAL NOT NULL DEFAULT 0,
+      message_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, date),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_daily_usage_date ON daily_usage(date);
+
+    CREATE TABLE IF NOT EXISTS redeem_codes (
+      code TEXT PRIMARY KEY,
+      type TEXT NOT NULL CHECK (type IN ('balance', 'subscription', 'trial')),
+      value_usd REAL,
+      plan_id TEXT,
+      duration_days INTEGER,
+      max_uses INTEGER NOT NULL DEFAULT 1,
+      used_count INTEGER NOT NULL DEFAULT 0,
+      expires_at TEXT,
+      created_by TEXT NOT NULL,
+      notes TEXT,
+      batch_id TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (plan_id) REFERENCES billing_plans(id),
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS redeem_code_usage (
+      code TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      used_at TEXT NOT NULL,
+      PRIMARY KEY (code, user_id),
+      FOREIGN KEY (code) REFERENCES redeem_codes(code) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS billing_audit_log (
+      id TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      user_id TEXT,
+      actor_user_id TEXT,
+      details_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_billing_audit_created
+      ON billing_audit_log(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS usage_events (
+      event_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      workspace_jid TEXT NOT NULL,
+      agent_id TEXT,
+      message_id TEXT,
+      source TEXT NOT NULL DEFAULT 'agent',
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+      reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+      provider_estimated_cost_usd REAL NOT NULL DEFAULT 0,
+      billed_cost_usd REAL,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      num_turns INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_events_user_created
+      ON usage_events(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_usage_events_workspace_created
+      ON usage_events(workspace_jid, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS usage_event_models (
+      event_id TEXT NOT NULL,
+      model TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+      reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+      provider_estimated_cost_usd REAL NOT NULL DEFAULT 0,
+      billed_cost_usd REAL,
+      PRIMARY KEY (event_id, model),
+      FOREIGN KEY (event_id) REFERENCES usage_events(event_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_event_models_model ON usage_event_models(model);
+
+    CREATE TABLE IF NOT EXISTS usage_daily_summary (
+      user_id TEXT NOT NULL,
+      workspace_jid TEXT NOT NULL,
+      agent_id TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL,
+      date TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+      reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+      provider_estimated_cost_usd REAL NOT NULL DEFAULT 0,
+      billed_cost_usd REAL,
+      run_count INTEGER NOT NULL DEFAULT 0,
+      model_call_count INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, workspace_jid, agent_id, model, date),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_daily_summary_user_date
+      ON usage_daily_summary(user_id, date);
+
+    INSERT OR IGNORE INTO billing_plans
+      (id, name, description, tier, monthly_cost_usd, rate_multiplier, allow_overage, features_json, is_default, is_active, created_at, updated_at)
+    VALUES
+      ('free', '免费套餐', '默认本地套餐', 0, 0, 1, 1, '[]', 1, 1, datetime('now'), datetime('now'));
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
@@ -585,6 +799,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 8, name: 'task_memory_tables', up: createTaskMemoryTables },
   { version: 9, name: 'execution_policy', up: migrateExecutionPolicy },
   { version: 10, name: 'provider_tables', up: createProviderTables },
+  { version: 11, name: 'usage_billing_tables', up: createUsageBillingTables },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {

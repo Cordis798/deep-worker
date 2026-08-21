@@ -6,10 +6,13 @@ import type { StreamEvent } from '@deep-worker/shared';
 import { getOwnedAgentProfile } from './agent-profiles.js';
 import { getOwnedRuntimeSession } from './runtime-sessions.js';
 import { getOwnedWorkspace } from './workspaces.js';
+import { getUserById } from './users.js';
 import { effectiveExecutionMode } from './execution-policy.js';
 import { getProviderBalance, getProviderCredentials, listProviderConfigs } from './provider-store.js';
 import { mapProviderToPiProvider, ProviderPool } from './provider-pool.js';
 import { runnerLifecycle } from './runner-lifecycle.js';
+import { checkBillingAccess } from './billing.js';
+import { recordUsageEvent } from './usage-service.js';
 import {
   appendRunnerOutboxEvent,
   claimRunnerTurn,
@@ -182,6 +185,8 @@ export class RuntimeRunnerService {
       }
       let selectedProviderId: string | undefined;
       let selectedProviderPool: ProviderPool | undefined;
+      let usageAgentId: string | null = null;
+      let usageModel: string | undefined;
       try {
         const session = getOwnedRuntimeSession(
           this.db,
@@ -192,9 +197,16 @@ export class RuntimeRunnerService {
         const workspace = getOwnedWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid);
         if (!session || session.status !== 'active' || !workspace)
           throw new Error('Runtime session not found');
+        const owner = getUserById(this.db, inbox.ownerUserId);
+        if (owner) {
+          const billingAccess = checkBillingAccess(this.db, owner.id, owner.role);
+          if (!billingAccess.allowed) throw new Error(billingAccess.reason ?? '当前账户不可用');
+        }
+        usageAgentId = session.agent_profile_id;
         selectedProviderPool = this.getProviderPool(inbox.ownerUserId);
         const selectedProvider = selectedProviderPool?.selectProvider(inbox.sessionId);
         selectedProviderId = selectedProvider?.id;
+        usageModel = selectedProvider?.model_id;
         const profile = session.agent_profile_id
           ? getOwnedAgentProfile(this.db, inbox.ownerUserId, session.agent_profile_id)
           : undefined;
@@ -230,6 +242,20 @@ export class RuntimeRunnerService {
             this.persistAndPublish(inbox.sessionId, turnId, nextOrdinal, event);
             nextOrdinal += 1;
           }
+        }
+        const usageEvent = [...events].reverse().find((event) => event.eventType === 'usage' && event.usage)?.usage;
+        if (usageEvent) {
+          recordUsageEvent({
+            db: this.db,
+            eventId: `runner:${turnId}`,
+            userId: inbox.ownerUserId,
+            workspaceJid: inbox.workspaceJid,
+            agentId: usageAgentId,
+            messageId: inbox.id,
+            source: 'agent',
+            model: usageModel,
+            usage: usageEvent,
+          });
         }
         if (selectedProviderId) selectedProviderPool?.reportSuccess(selectedProviderId);
         completeRunnerTurn(this.db, turnId, this.workerId, result.reply);

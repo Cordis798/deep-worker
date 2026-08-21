@@ -151,6 +151,7 @@ export interface FakePiRunnerOptions {
   delayMs?: number;
   failuresBeforeSuccess?: number;
   emitBash?: boolean;
+  emitUsage?: boolean;
 }
 
 /** 用于测试和本地开发的确定性运行器，不需要接口密钥。 */
@@ -220,6 +221,22 @@ export class FakePiRunner implements AgentRunner {
         isSynthetic: true,
       };
       events.push(event);
+    }
+    if (this.options.emitUsage) {
+      events.push({
+        eventType: 'usage',
+        sessionId: request.sessionId,
+        turnId: request.turnId,
+        queryRunId: request.queryRunId,
+        usage: {
+          inputTokens: Math.max(1, Math.ceil(request.message.length / 4)),
+          outputTokens: Math.max(1, Math.ceil(reply.length / 4)),
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          durationMs: this.options.delayMs,
+        },
+        isSynthetic: true,
+      });
     }
     events.push({
       eventType: 'status',

@@ -26,6 +26,8 @@ import { createProviderRoutes } from './routes/providers.js';
 import { createMonitorRoutes } from './routes/monitor.js';
 import type { ContainerRunnerStatusSource } from './monitoring.js';
 import { readMountAllowlist, validateAdditionalMounts } from './mount-security.js';
+import { createUsageRoutes } from './routes/usage.js';
+import { createBillingRoutes } from './routes/billing.js';
 
 export type App = Hono<{ Variables: AppVariables }> & {
   close: () => Promise<void>;
@@ -87,6 +89,8 @@ export function createApp(
   app.route('/api/channel-accounts', createChannelAccountRoutes(db));
   app.route('/api/capabilities', createCapabilityRoutes(db));
   app.route('/api/providers', createProviderRoutes(db));
+  app.route('/api/usage', createUsageRoutes(db));
+  app.route('/api/billing', createBillingRoutes(db));
   app.route('/api/monitor', createMonitorRoutes(db, runnerService, taskService, containerRunnerStatus));
   app.route('/api/tasks', createTaskRoutes(taskService, db));
   app.route('/api/workspaces', createMemoryRoutes(db));
