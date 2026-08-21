@@ -17,6 +17,7 @@ export interface SessionClient {
   getState(): Promise<SessionStateLike>;
   promptAndWait?(message: string, options?: PromptAndWaitOptions): Promise<RpcEvent[]>;
   getLastAssistantText?(): Promise<string | null>;
+  setModel?(provider: string, modelId: string): Promise<Record<string, unknown>>;
 }
 
 export interface SessionConfig {
@@ -26,6 +27,7 @@ export interface SessionConfig {
   sessionFile?: string;
   identityHash?: string;
   capabilityHash?: string;
+  providerHash?: string;
   env?: NodeJS.ProcessEnv;
   capabilities?: PiCapabilityInjection;
 }
@@ -41,6 +43,7 @@ interface ManagedSession {
   client: SessionClient;
   identityHash?: string;
   capabilityHash?: string;
+  providerHash?: string;
   lastUsedAt: number;
   inUse: number;
 }
@@ -67,7 +70,8 @@ export class PiSessionManager {
     if (
       existing &&
       existing.identityHash === config.identityHash &&
-      existing.capabilityHash === requestedCapabilityHash
+      existing.capabilityHash === requestedCapabilityHash &&
+      existing.providerHash === config.providerHash
     ) {
       existing.lastUsedAt = Date.now();
       return existing.client;
@@ -114,6 +118,7 @@ export class PiSessionManager {
       client,
       identityHash: config.identityHash,
       capabilityHash: requestedCapabilityHash,
+      providerHash: config.providerHash,
       lastUsedAt: Date.now(),
       inUse: 0,
     });

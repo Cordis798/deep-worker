@@ -22,6 +22,16 @@ export interface AgentRunRequest {
   queryRunId?: string;
   timeoutMs?: number;
   capabilities?: PiCapabilityInjection;
+  provider?: PiProviderSelection;
+  containerMounts?: Array<{ hostPath: string; containerPath: string; readonly: boolean }>;
+  containerLimits?: { memoryMb?: number; cpus?: number; pids?: number; tmpfsMb?: number };
+}
+
+export interface PiProviderSelection {
+  provider: string;
+  modelId: string;
+  env?: NodeJS.ProcessEnv;
+  hash?: string;
 }
 
 export interface AgentRunResult {
@@ -79,6 +89,8 @@ export class PiRunner implements AgentRunner {
       identityHash: request.identityHash,
       capabilityHash: request.capabilityHash,
       capabilities: request.capabilities,
+      providerHash: request.provider?.hash,
+      env: request.provider?.env,
     };
     const prompt = assemblePrompt({
       systemPrompt: request.systemPrompt,
@@ -101,6 +113,9 @@ export class PiRunner implements AgentRunner {
       await this.sessions.withSession(config, async (client) => {
         if (!client.promptAndWait) {
           throw new Error('Pi session client does not support promptAndWait');
+        }
+        if (request.provider && client.setModel) {
+          await client.setModel(request.provider.provider, request.provider.modelId);
         }
         const completedEvents = await client.promptAndWait(prompt, {
           timeoutMs: request.timeoutMs,
