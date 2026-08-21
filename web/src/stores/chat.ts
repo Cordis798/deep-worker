@@ -101,12 +101,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       let stream: ReturnType<typeof openTurnStream> | null = null;
       stream = openTurnStream(workspaceId, sessionId, response.turn.id, {
         onEvent: (event) => {
+          let failureMessage: string | null = null;
           set((state) => {
             const current = state.messages[messageKey(sessionId)] ?? [];
             const next = updateAssistant(current, assistantId, (message) => {
+              const isFailure =
+                event.eventType === 'status' && event.statusText === 'agent failed';
               const isTerminal =
                 event.eventType === 'status' && event.statusText !== 'agent started';
               if (isTerminal) terminal = true;
+              if (isFailure) {
+                failureMessage = event.detail ?? event.summary ?? 'Pi Agent 执行失败';
+              }
               return {
                 ...message,
                 text:
@@ -118,10 +124,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     ? `${message.thinking}${event.text ?? ''}`
                     : message.thinking,
                 events: [...message.events, event],
-                status: isTerminal ? 'complete' : message.status,
+                status: isFailure ? 'error' : isTerminal ? 'complete' : message.status,
               };
             });
-            return { messages: { ...state.messages, [messageKey(sessionId)]: next } };
+            return {
+              messages: { ...state.messages, [messageKey(sessionId)]: next },
+              sendError: failureMessage
+                ? { ...state.sendError, [sessionId]: failureMessage }
+                : state.sendError,
+            };
           });
           if (terminal) {
             stream?.close();

@@ -87,6 +87,14 @@ export interface RuntimeRunnerServiceOptions {
 
 const sleep = (delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs));
 
+function shouldRetryRunnerError(message: string): boolean {
+  return ![
+    '余额不足',
+    '未找到有效套餐',
+    '当前账户不可用',
+  ].some((marker) => message.includes(marker));
+}
+
 /** 为任意智能体运行器提供可恢复的收件箱、执行回合和待发事件编排。 */
 export class RuntimeRunnerService {
   readonly streamHub: RunnerStreamHub;
@@ -268,7 +276,7 @@ export class RuntimeRunnerService {
         if (typeof selectedProviderId === 'string') selectedProviderPool?.reportFailure(selectedProviderId, true);
         const message = error instanceof Error ? error.message : String(error);
         const current = getRunnerTurnById(this.db, turnId)!;
-        if (current.attempt < this.maxAttempts) {
+        if (shouldRetryRunnerError(message) && current.attempt < this.maxAttempts) {
           const delayMs = Math.min(5_000, this.retryBaseMs * 2 ** (current.attempt - 1));
           retryRunnerTurn(
             this.db,
@@ -281,6 +289,19 @@ export class RuntimeRunnerService {
           continue;
         }
         failRunnerTurn(this.db, turnId, this.workerId, message);
+        const failureEvent: StreamEvent = {
+          eventType: 'status',
+          sessionId: inbox.sessionId,
+          turnId,
+          queryRunId: turnId,
+          statusText: 'agent failed',
+          summary: 'Pi Agent 执行失败',
+          detail: message,
+          displayLevel: 'primary',
+          isSynthetic: true,
+        };
+        events.push(failureEvent);
+        this.persistAndPublish(inbox.sessionId, turnId, nextOrdinal, failureEvent);
         const failed = getRunnerTurnById(this.db, turnId)!;
         return { turn: failed, reply: null, events };
       }

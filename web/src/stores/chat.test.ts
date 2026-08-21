@@ -73,4 +73,24 @@ describe('聊天流状态', () => {
     expect(useChatStore.getState().activeTurns.rs_sync).toBeUndefined();
     expect(openTurnStream.mock.results[1]?.value.close).toHaveBeenCalled();
   });
+
+  it('把 Runner 的失败原因展示给用户，而不是误报为流断开', async () => {
+    post.mockResolvedValueOnce({ turn: { id: 'turn_failed' } });
+    openTurnStream.mockImplementationOnce((_workspace, _session, _turn, handlers) => {
+      handlers.onEvent({
+        eventType: 'status',
+        statusText: 'agent failed',
+        summary: 'Pi Agent 执行失败',
+        detail: '余额不足，至少需要 $0.00',
+      });
+      return { close: vi.fn() };
+    });
+    useChatStore.setState({ messages: {}, activeTurns: {}, sendError: {} });
+
+    await useChatStore.getState().sendMessage('web:one', 'rs_failed', '失败请求');
+
+    expect(useChatStore.getState().messages.rs_failed?.[1]?.status).toBe('error');
+    expect(useChatStore.getState().sendError.rs_failed).toBe('余额不足，至少需要 $0.00');
+    expect(useChatStore.getState().activeTurns.rs_failed).toBeUndefined();
+  });
 });

@@ -104,6 +104,34 @@ describe('RuntimeRunnerService', () => {
     await service.close();
   });
 
+  it('does not retry billing failures and persists a readable terminal event', async () => {
+    db.prepare('INSERT INTO user_balances (user_id, balance_usd, updated_at) VALUES (?, ?, ?)').run(
+      'u1',
+      -0.01,
+      new Date().toISOString(),
+    );
+    const runner = new FakePiRunner({ response: '不应执行' });
+    const service = new RuntimeRunnerService({ db, runner, retryBaseMs: 100 });
+
+    const result = await service.submit({
+      ownerUserId: 'u1',
+      workspaceJid: 'w1',
+      sessionId: 's1',
+      message: '余额不足',
+      idempotencyKey: 'billing-failure',
+    });
+
+    expect(result.turn).toMatchObject({ status: 'failed', attempt: 1 });
+    expect(result.reply).toBeNull();
+    expect(runner.calls).toHaveLength(0);
+    expect(result.events.at(-1)).toMatchObject({
+      eventType: 'status',
+      statusText: 'agent failed',
+      detail: '余额不足，至少需要 $0.00',
+    });
+    await service.close();
+  });
+
   it('allows different sessions to run concurrently', async () => {
     let active = 0;
     let maxActive = 0;
