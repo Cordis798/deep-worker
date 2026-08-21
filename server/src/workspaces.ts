@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
 import type Database from 'better-sqlite3';
+import { DATA_DIR } from './config.js';
 import { getOwnedAgentProfile } from './agent-profiles.js';
 import { resolveRequestedExecutionMode, type ExecutionMode } from './execution-policy.js';
 
@@ -20,6 +22,13 @@ export interface WorkspaceRow {
 
 export function generateWorkspaceJid(): string {
   return `web:${crypto.randomUUID()}`;
+}
+
+/** 返回工作区实际使用的宿主机目录。JID 仅作为标识，不能直接作为 Windows 目录名。 */
+export function workspaceRoot(jid: string): string {
+  const sanitized = jid.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const safeJid = sanitized === '.' || sanitized === '..' ? `_${sanitized}` : sanitized;
+  return path.join(DATA_DIR, 'workspaces', safeJid || '_');
 }
 
 export function getWorkspaceById(db: Db, jid: string): WorkspaceRow | undefined {

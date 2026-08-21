@@ -1,11 +1,12 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import type Database from 'better-sqlite3';
 import type { AgentRunner, AgentRunRequest } from '@deep-worker/pi-runner';
 import { SessionQueue, type SessionQueueOptions } from '@deep-worker/pi-runner';
 import type { StreamEvent } from '@deep-worker/shared';
 import { getOwnedAgentProfile } from './agent-profiles.js';
 import { getOwnedRuntimeSession } from './runtime-sessions.js';
-import { getOwnedWorkspace } from './workspaces.js';
+import { getOwnedWorkspace, workspaceRoot } from './workspaces.js';
 import { getUserById } from './users.js';
 import { effectiveExecutionMode } from './execution-policy.js';
 import { getProviderBalance, getProviderCredentials, listProviderConfigs } from './provider-store.js';
@@ -225,7 +226,7 @@ export class RuntimeRunnerService {
           ownerUserId: inbox.ownerUserId,
           sessionId: inbox.sessionId,
           message: inbox.message,
-          cwd: workspace.folder,
+          cwd: workspaceRoot(workspace.jid),
           systemPrompt: options.systemPrompt ?? profile?.identity_prompt,
           outputContract: options.outputContract,
           timeoutMs: options.timeoutMs,
@@ -238,6 +239,7 @@ export class RuntimeRunnerService {
             ? mapProviderToPiProvider(selectedProvider, getProviderCredentials(this.db, inbox.ownerUserId, selectedProvider.id))
             : undefined,
         };
+        await fs.mkdir(request.cwd!, { recursive: true });
         const executionRunner = effectiveExecutionMode(this.db, workspace) === 'container'
           ? this.containerRunner
           : this.runner;

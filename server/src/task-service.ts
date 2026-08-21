@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import type Database from 'better-sqlite3';
 import type { RuntimeRunnerService } from './runtime-runner-service.js';
-import { getOwnedWorkspace } from './workspaces.js';
+import { getOwnedWorkspace, workspaceRoot } from './workspaces.js';
 import { getUserById } from './users.js';
 import { effectiveExecutionMode } from './execution-policy.js';
 import {
@@ -211,10 +211,11 @@ export class TaskService {
     if (effectiveExecutionMode(this.db, workspace) !== 'host') throw new Error('当前工作区不是 Host 执行模式');
     const command = task.script_command?.trim();
     if (!command) throw new Error('脚本命令为空');
-    fs.mkdirSync(workspace.folder, { recursive: true });
+    const root = workspaceRoot(workspace.jid);
+    fs.mkdirSync(root, { recursive: true });
     return new Promise((resolve, reject) => {
       const child = spawn(command, {
-        cwd: workspace.folder,
+        cwd: root,
         shell: true,
         env: process.env,
         stdio: ['ignore', 'pipe', 'pipe'],

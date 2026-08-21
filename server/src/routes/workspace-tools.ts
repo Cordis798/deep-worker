@@ -3,20 +3,14 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { NodeWebSocket } from '@hono/node-ws';
 import { Hono } from 'hono';
-import { DATA_DIR } from '../config.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { getOwnedWorkspace } from '../workspaces.js';
+import { getOwnedWorkspace, workspaceRoot } from '../workspaces.js';
 import type { AppVariables } from '../types.js';
 import { extractFileText, FileTextError } from '../file-text-extractor.js';
 import { TerminalManager } from '../terminal-manager.js';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_TEXT_BYTES = 5 * 1024 * 1024;
-
-function workspaceRoot(jid: string) {
-  const safeJid = jid.replace(/[^a-zA-Z0-9_.-]/g, '_');
-  return path.join(DATA_DIR, 'workspaces', safeJid);
-}
 
 function relativePath(input: string | undefined) {
   const normalized = path.posix.normalize((input ?? '').replaceAll('\\', '/'));

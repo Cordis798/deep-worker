@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { FakePiRunner } from '@deep-worker/pi-runner';
 import type { AgentRunner } from '@deep-worker/pi-runner';
@@ -11,6 +12,7 @@ import {
 } from './runner-reliability.js';
 import { setBillingEnabled } from './billing.js';
 import { RuntimeRunnerService } from './runtime-runner-service.js';
+import { workspaceRoot } from './workspaces.js';
 
 let db: Database.Database;
 
@@ -33,6 +35,11 @@ beforeEach(() => {
     `INSERT INTO runtime_sessions (id, workspace_jid, name, status, created_at, updated_at)
      VALUES ('s2', 'w1', 'S2', 'active', ?, ?)`,
   ).run(now, now);
+});
+
+afterEach(() => {
+  fs.rmSync(workspaceRoot('w1'), { recursive: true, force: true });
+  fs.rmSync(workspaceRoot('w2'), { recursive: true, force: true });
 });
 
 describe('RuntimeRunnerService', () => {
@@ -65,6 +72,36 @@ describe('RuntimeRunnerService', () => {
     expect(runner.calls).toHaveLength(1);
     expect(listRunnerOutbox(db, first.turn.id).length).toBeGreaterThan(0);
     unsubscribe();
+    await service.close();
+  });
+
+  it('使用安全的工作区根目录，不把数据库中的 folder 当作 Windows cwd', async () => {
+    db.prepare('UPDATE workspaces SET folder = ? WHERE jid = ?').run(
+      'web:invalid-windows-folder',
+      'w1',
+    );
+    let observedCwd: string | undefined;
+    const runner: AgentRunner = {
+      async run(request) {
+        observedCwd = request.cwd;
+        expect(request.cwd).toBe(workspaceRoot('w1'));
+        expect(fs.existsSync(request.cwd!)).toBe(true);
+        return { sessionId: request.sessionId, reply: '路径正常', events: [], attempts: 1 };
+      },
+      async close() {},
+    };
+    const service = new RuntimeRunnerService({ db, runner, retryBaseMs: 0 });
+
+    const result = await service.submit({
+      ownerUserId: 'u1',
+      workspaceJid: 'w1',
+      sessionId: 's1',
+      message: '检查工作区路径',
+      idempotencyKey: 'workspace-path',
+    });
+
+    expect(result.reply).toBe('路径正常');
+    expect(observedCwd).toBe(workspaceRoot('w1'));
     await service.close();
   });
 
