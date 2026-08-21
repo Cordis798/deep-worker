@@ -65,9 +65,10 @@ describe('Workspace files and terminal routes', () => {
       headers: { cookie: `dw_session=${cookie}` },
     });
     expect(list.status).toBe(200);
-    const listBody = (await list.json()) as { sessions: Array<{ degraded: boolean }> };
+    const listBody = (await list.json()) as { sessions: Array<{ mode: 'pty' | 'pipe'; degraded: boolean }> };
     expect(listBody.sessions).toHaveLength(1);
-    expect(listBody.sessions[0]?.degraded).toBe(true);
+    expect(['pty', 'pipe']).toContain(listBody.sessions[0]?.mode);
+    expect(listBody.sessions[0]?.degraded).toBe(listBody.sessions[0]?.mode === 'pipe');
     await app.close();
   });
 

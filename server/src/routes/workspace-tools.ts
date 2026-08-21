@@ -224,7 +224,16 @@ export function createWorkspaceToolsRoutes(
     const root = workspaceRoot(workspace.jid);
     await ensureRoot(root);
     const session = terminals.start(user.id, workspace.jid, root);
-    return c.json({ session: { id: session.id, status: session.status, shell: terminals.shellName(), degraded: true, notice: '当前使用 Node 子进程流，暂不提供真实 PTY 的窗口大小控制。' } }, 201);
+    return c.json({
+      session: {
+        id: session.id,
+        status: session.status,
+        shell: terminals.shellName(),
+        mode: session.mode,
+        degraded: session.mode !== 'pty',
+        ...(session.mode === 'pty' ? {} : { notice: '当前环境不支持原生 PTY，已回退到标准输入输出流。' }),
+      },
+    }, 201);
   });
 
   app.delete('/:jid/terminal-sessions/:sessionId', (c) => {
@@ -242,15 +251,18 @@ export function createWorkspaceToolsRoutes(
         onOpen: (_event, ws) => {
           if (!session) { ws.close(4404, 'Terminal session not found'); return; }
           const snapshot = terminals.snapshot(session);
-          ws.send(JSON.stringify({ type: 'snapshot', data: snapshot.output, status: snapshot.status }));
+          ws.send(JSON.stringify({ type: 'snapshot', data: snapshot.output, status: snapshot.status, mode: snapshot.mode }));
           unsubscribe = terminals.subscribe(session, (message) => ws.send(JSON.stringify(message)));
         },
         onMessage: (event) => {
           if (!session || typeof event.data !== 'string') return;
           try {
-            const message = JSON.parse(event.data) as { type?: string; data?: string };
+            const message = JSON.parse(event.data) as { type?: string; data?: string; cols?: number; rows?: number };
             if (message.type === 'input' && typeof message.data === 'string') terminals.write(session, message.data);
-            if (message.type === 'close') session.process.kill();
+            if (message.type === 'resize' && Number.isFinite(message.cols) && Number.isFinite(message.rows)) {
+              terminals.resize(session, message.cols!, message.rows!);
+            }
+            if (message.type === 'close') terminals.terminate(session);
           } catch {
             // 忽略格式错误的终端消息，不让连接中断。
           }
