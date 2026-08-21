@@ -105,11 +105,19 @@ export function listBillingPlans(db: Database.Database, activeOnly = false): Bil
 export function createBillingPlan(db: Database.Database, input: Partial<BillingPlan> & Pick<BillingPlan, 'id' | 'name'>): BillingPlan {
   if (!/^[a-z0-9][a-z0-9_-]{1,63}$/.test(input.id)) throw new Error('套餐 ID 格式无效');
   if (!input.name.trim()) throw new Error('套餐名称不能为空');
+  const quotaValues = [input.monthlyTokenQuota, input.monthlyCostQuota, input.dailyTokenQuota, input.dailyCostQuota, input.weeklyTokenQuota, input.weeklyCostQuota];
+  if (quotaValues.some((value) => value !== null && value !== undefined && (!Number.isInteger(value) || value < 0))) throw new Error('套餐配额必须是非负整数');
+  if (input.rateMultiplier !== undefined && (!Number.isFinite(input.rateMultiplier) || input.rateMultiplier < 0)) throw new Error('计费倍率必须是非负数');
   const timestamp = now();
-  db.prepare(`INSERT INTO billing_plans (id, name, description, tier, monthly_cost_usd, monthly_token_quota, monthly_cost_quota, daily_token_quota, daily_cost_quota, weekly_token_quota, weekly_cost_quota, rate_multiplier, trial_days, sort_order, display_price, highlight, allow_overage, features_json, is_default, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-    input.id, input.name.trim(), input.description ?? null, input.tier ?? 0, input.monthlyCostUSD ?? 0, input.monthlyTokenQuota ?? null, input.monthlyCostQuota ?? null, input.dailyTokenQuota ?? null, input.dailyCostQuota ?? null, input.weeklyTokenQuota ?? null, input.weeklyCostQuota ?? null, input.rateMultiplier ?? 1, input.trialDays ?? null, input.sortOrder ?? 0, input.displayPrice ?? null, input.highlight ? 1 : 0, input.allowOverage ? 1 : 0, JSON.stringify(input.features ?? []), input.isDefault ? 1 : 0, input.isActive === false ? 0 : 1, timestamp, timestamp,
-  );
-  if (input.isDefault) db.prepare('UPDATE billing_plans SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END').run(input.id);
+  db.transaction(() => {
+    db.prepare(`INSERT INTO billing_plans (id, name, description, tier, monthly_cost_usd, monthly_token_quota, monthly_cost_quota, daily_token_quota, daily_cost_quota, weekly_token_quota, weekly_cost_quota, rate_multiplier, trial_days, sort_order, display_price, highlight, allow_overage, features_json, is_default, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`).run(
+      input.id, input.name.trim(), input.description ?? null, input.tier ?? 0, input.monthlyCostUSD ?? 0, input.monthlyTokenQuota ?? null, input.monthlyCostQuota ?? null, input.dailyTokenQuota ?? null, input.dailyCostQuota ?? null, input.weeklyTokenQuota ?? null, input.weeklyCostQuota ?? null, input.rateMultiplier ?? 1, input.trialDays ?? null, input.sortOrder ?? 0, input.displayPrice ?? null, input.highlight ? 1 : 0, input.allowOverage ? 1 : 0, JSON.stringify(input.features ?? []), input.isActive === false ? 0 : 1, timestamp, timestamp,
+    );
+    if (input.isDefault) {
+      db.prepare('UPDATE billing_plans SET is_default = 0').run();
+      db.prepare('UPDATE billing_plans SET is_default = 1 WHERE id = ?').run(input.id);
+    }
+  })();
   return getBillingPlan(db, input.id)!;
 }
 
@@ -135,14 +143,17 @@ export function updateBillingPlan(db: Database.Database, id: string, input: Part
   if (!fields.length) return current;
   set('updated_at', now());
   values.push(id);
-  db.prepare(`UPDATE billing_plans SET ${fields.join(', ')} WHERE id = ?`).run(...values);
-  if (input.isDefault) db.prepare('UPDATE billing_plans SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END').run(id);
+  db.transaction(() => {
+    if (input.isDefault) db.prepare('UPDATE billing_plans SET is_default = 0').run();
+    db.prepare(`UPDATE billing_plans SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  })();
   return getBillingPlan(db, id);
 }
 
 export function deleteBillingPlan(db: Database.Database, id: string): boolean {
   const plan = getBillingPlan(db, id);
   if (!plan || plan.isDefault) return false;
+  if (db.prepare('SELECT 1 FROM user_subscriptions WHERE plan_id = ? LIMIT 1').get(id)) return false;
   return db.prepare('DELETE FROM billing_plans WHERE id = ?').run(id).changes === 1;
 }
 
@@ -263,6 +274,8 @@ export function createRedeemCode(db: Database.Database, input: RedeemCodeInput):
   if (!input.code.trim()) throw new Error('兑换码不能为空');
   if (input.type === 'balance' && (!input.valueUSD || input.valueUSD <= 0)) throw new Error('余额兑换码必须有正数金额');
   if (input.type !== 'balance' && !input.planId) throw new Error('套餐兑换码必须指定套餐');
+  if (!Number.isInteger(input.maxUses ?? 1) || (input.maxUses ?? 1) < 1) throw new Error('兑换码次数必须是正整数');
+  if (input.durationDays !== null && input.durationDays !== undefined && (!Number.isInteger(input.durationDays) || input.durationDays < 1)) throw new Error('兑换码时长必须是正整数');
   const code = input.code.trim().toUpperCase();
   db.prepare('INSERT INTO redeem_codes (code, type, value_usd, plan_id, duration_days, max_uses, expires_at, created_by, notes, batch_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(code, input.type, input.valueUSD ?? null, input.planId ?? null, input.durationDays ?? null, input.maxUses ?? 1, input.expiresAt ?? null, input.createdBy, input.notes ?? null, input.batchId ?? null, now());
   return getRedeemCode(db, code)!;

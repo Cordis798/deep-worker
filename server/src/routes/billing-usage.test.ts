@@ -33,4 +33,15 @@ describe('用量与计费 API', () => {
     expect(((await billing.json()) as { plan: { id: string } }).plan.id).toBe('free');
     await app.close();
   });
+
+  it('拒绝非法日期并按 days 参数扩大查询窗口', async () => {
+    const app = createApp({ db: initDatabase(':memory:'), runner: new FakePiRunner() });
+    const { cookie } = await setup(app);
+    const invalid = await app.request('/api/usage/stats?from=2026-02-31&to=2026-03-01', { headers: { cookie: `dw_session=${cookie}` } });
+    expect(invalid.status).toBe(400);
+    const range = await app.request('/api/usage/stats?days=30', { headers: { cookie: `dw_session=${cookie}` } });
+    const range7 = await app.request('/api/usage/stats?days=7', { headers: { cookie: `dw_session=${cookie}` } });
+    expect(((await range.json()) as { window: { from: string; to: string } }).window.from).not.toBe(((await range7.json()) as { window: { from: string; to: string } }).window.from);
+    await app.close();
+  });
 });

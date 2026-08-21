@@ -30,4 +30,12 @@ describe('计费与配额', () => {
     expect(checkQuota(db, 'member', 'member').allowed).toBe(false);
     expect(checkBillingAccess(db, 'member', 'member').blockType).toBe('quota_exceeded');
   });
+
+  it('默认套餐切换不会触发唯一索引冲突，已被订阅的套餐不能删除', () => {
+    const { db } = fixture();
+    createBillingPlan(db, { id: 'pro', name: '专业套餐', isDefault: true });
+    expect(db.prepare('SELECT id FROM billing_plans WHERE is_default = 1').get()).toEqual({ id: 'pro' });
+    assignPlan(db, 'member', 'pro', 'admin');
+    expect(() => db.prepare('DELETE FROM billing_plans WHERE id = ?').run('pro')).toThrow();
+  });
 });

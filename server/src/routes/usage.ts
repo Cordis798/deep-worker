@@ -4,17 +4,23 @@ import { authMiddleware } from '../middleware/auth.js';
 import { getUsageAnalytics, listUsageRecords, type UsageFilters } from '../usage-service.js';
 import type { AppVariables } from '../types.js';
 
-function validDate(value: string | undefined): value is string { return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)); }
+function validDate(value: string | undefined): value is string { if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const parsed = new Date(`${value}T00:00:00Z`); return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value; }
 
 function filtersFor(c: { req: { query: (name: string) => string | undefined }; get: (key: 'user') => AppVariables['user'] }): UsageFilters {
   const user = c.get('user')!;
   const today = new Date();
-  const to = validDate(c.req.query('to')) ? c.req.query('to')! : today.toISOString().slice(0, 10);
-  const defaultFrom = new Date(today.getTime() - 6 * 86400000).toISOString().slice(0, 10);
-  const from = validDate(c.req.query('from')) ? c.req.query('from')! : defaultFrom;
+  const rawTo = c.req.query('to');
+  const rawFrom = c.req.query('from');
+  if (rawFrom && !validDate(rawFrom)) throw new Error('起始日期格式无效，应为 YYYY-MM-DD');
+  if (rawTo && !validDate(rawTo)) throw new Error('结束日期格式无效，应为 YYYY-MM-DD');
+  const to = validDate(rawTo) ? rawTo : today.toISOString().slice(0, 10);
+  const requestedDays = Number.parseInt(c.req.query('days') ?? '7', 10);
+  const windowDays = Number.isInteger(requestedDays) ? Math.min(365, Math.max(1, requestedDays)) : 7;
+  const defaultFrom = new Date(today.getTime() - (windowDays - 1) * 86400000).toISOString().slice(0, 10);
+  const from = validDate(rawFrom) ? rawFrom : defaultFrom;
   if (from > to) throw new Error('起始日期不能晚于结束日期');
-  const days = Math.floor((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000) + 1;
-  if (days > 365) throw new Error('用量查询范围不能超过 365 天');
+  const rangeDays = Math.floor((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000) + 1;
+  if (rangeDays > 365) throw new Error('用量查询范围不能超过 365 天');
   return {
     from,
     to,
