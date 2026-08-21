@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { getOwnedAgentProfile } from './agent-profiles.js';
+import { resolveRequestedExecutionMode, type ExecutionMode } from './execution-policy.js';
 
 export type Db = Database.Database;
 
@@ -54,6 +55,7 @@ export interface CreateWorkspaceFields {
   name: string;
   agent_profile_id?: string | null;
   is_home?: boolean;
+  execution_mode?: ExecutionMode;
   created_at?: string;
 }
 
@@ -67,13 +69,15 @@ export function createWorkspace(
     if (!profile) return undefined;
   }
   const now = fields.created_at ?? new Date().toISOString();
+  const execution = resolveRequestedExecutionMode(db, ownerUserId, fields.execution_mode);
+  if (!execution.ok) return undefined;
   const jid = fields.jid ?? generateWorkspaceJid();
   const folder = fields.folder ?? jid;
   db.prepare(
     `INSERT INTO workspaces (
-      jid, folder, owner_user_id, name, agent_profile_id, status, is_home,
+      jid, folder, owner_user_id, name, agent_profile_id, status, execution_mode, is_home,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     folder,
@@ -81,6 +85,7 @@ export function createWorkspace(
     fields.name,
     fields.agent_profile_id ?? null,
     'active',
+    execution.mode,
     fields.is_home ? 1 : 0,
     now,
     now,
@@ -92,8 +97,8 @@ export function updateWorkspace(
   db: Db,
   ownerUserId: string,
   jid: string,
-  fields: { name?: string; agent_profile_id?: string | null },
-): { ok: boolean; reason?: 'not_found' | 'home_immutable' | 'invalid_profile' } {
+  fields: { name?: string; agent_profile_id?: string | null; execution_mode?: ExecutionMode },
+): { ok: boolean; reason?: 'not_found' | 'home_immutable' | 'invalid_profile' | 'host_forbidden' } {
   const row = getOwnedWorkspace(db, ownerUserId, jid);
   if (!row) return { ok: false, reason: 'not_found' };
   const sets: string[] = [];
@@ -112,6 +117,13 @@ export function updateWorkspace(
     if (row.is_home === 1) return { ok: false, reason: 'home_immutable' };
     sets.push('agent_profile_id = ?');
     params.push(fields.agent_profile_id);
+  }
+  if (fields.execution_mode !== undefined) {
+    const execution = resolveRequestedExecutionMode(db, ownerUserId, fields.execution_mode);
+    if (!execution.ok) return { ok: false, reason: execution.reason };
+    if (row.is_home === 1 && fields.execution_mode !== row.execution_mode) return { ok: false, reason: 'home_immutable' };
+    sets.push('execution_mode = ?');
+    params.push(execution.mode);
   }
   if (sets.length === 0) return { ok: true };
   params.push(new Date().toISOString(), jid, ownerUserId);

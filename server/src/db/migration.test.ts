@@ -115,12 +115,24 @@ describe('sqlite migration framework', () => {
 
   it('upgrades an old database to head', () => {
     const dbPath = path.join(dir, 'deep-worker.db');
-    const old = initDatabase(dbPath, { targetVersion: 1 });
-    expect(readSchemaVersion(old)).toBe(1);
+    const old = initDatabase(dbPath, { targetVersion: 8 });
+    const now = new Date().toISOString();
+    old.prepare(
+      `INSERT INTO users (id, username, password_hash, display_name, role, status, permissions, created_at, updated_at)
+       VALUES ('legacy-member', 'legacy-member', 'x', '成员', 'member', 'active', '[]', ?, ?)`,
+    ).run(now, now);
+    old.prepare(
+      `INSERT INTO workspaces (jid, folder, owner_user_id, name, status, execution_mode, is_home, created_at, updated_at)
+       VALUES ('legacy-workspace', 'legacy-workspace', 'legacy-member', '旧工作区', 'active', 'host', 0, ?, ?)`,
+    ).run(now, now);
+    expect(readSchemaVersion(old)).toBe(8);
     old.close();
 
     const upgraded = initDatabase(dbPath);
     expect(readSchemaVersion(upgraded)).toBe(CURRENT_SCHEMA_VERSION);
+    expect(
+      (upgraded.prepare('SELECT execution_mode FROM workspaces WHERE jid = ?').get('legacy-workspace') as { execution_mode: string }).execution_mode,
+    ).toBe('container');
     expect(
       upgraded
         .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runtime_flags'")

@@ -21,6 +21,7 @@ import { createCapabilityRoutes } from './routes/capabilities.js';
 import { createTaskRoutes } from './routes/tasks.js';
 import { createMemoryRoutes } from './routes/memory.js';
 import { TaskService } from './task-service.js';
+import { ContainerRunner } from './container-runner.js';
 
 export type App = Hono<{ Variables: AppVariables }> & {
   close: () => Promise<void>;
@@ -42,7 +43,8 @@ export function createApp(
       baseDir: path.join(DATA_DIR, 'pi-sessions'),
       queueOptions: { maxAttempts: 1 },
     });
-  const runnerService = options.runnerService ?? new RuntimeRunnerService({ db, runner });
+  const containerRunner = options.runner ? options.runner : new ContainerRunner();
+  const runnerService = options.runnerService ?? new RuntimeRunnerService({ db, runner, containerRunner });
   const taskService = options.taskService ?? new TaskService({ db, runnerService });
   const app = new Hono<{ Variables: AppVariables }>();
   const nodeWebSocket = createNodeWebSocket({ app });

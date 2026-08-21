@@ -6,6 +6,7 @@ import type { StreamEvent } from '@deep-worker/shared';
 import { getOwnedAgentProfile } from './agent-profiles.js';
 import { getOwnedRuntimeSession } from './runtime-sessions.js';
 import { getOwnedWorkspace } from './workspaces.js';
+import { effectiveExecutionMode } from './execution-policy.js';
 import {
   appendRunnerOutboxEvent,
   claimRunnerTurn,
@@ -69,6 +70,7 @@ export class RunnerStreamHub {
 export interface RuntimeRunnerServiceOptions {
   db: Db;
   runner: AgentRunner;
+  containerRunner?: AgentRunner;
   leaseMs?: number;
   maxAttempts?: number;
   retryBaseMs?: number;
@@ -84,6 +86,7 @@ export class RuntimeRunnerService {
   readonly streamHub: RunnerStreamHub;
   private readonly db: Db;
   private readonly runner: AgentRunner;
+  private readonly containerRunner: AgentRunner;
   private readonly leaseMs: number;
   private readonly maxAttempts: number;
   private readonly retryBaseMs: number;
@@ -93,6 +96,8 @@ export class RuntimeRunnerService {
   constructor(options: RuntimeRunnerServiceOptions) {
     this.db = options.db;
     this.runner = options.runner;
+    // 直接注入的 Fake Runner 作为测试容器引擎；生产应用会显式传入 ContainerRunner。
+    this.containerRunner = options.containerRunner ?? options.runner;
     this.leaseMs = options.leaseMs ?? 60_000;
     this.maxAttempts = options.maxAttempts ?? 3;
     this.retryBaseMs = options.retryBaseMs ?? 100;
@@ -196,7 +201,10 @@ export class RuntimeRunnerService {
           capabilities: options.capabilities,
           capabilityHash: options.capabilities?.hash,
         };
-        const result = await this.runner.run(request, (event) => {
+        const executionRunner = effectiveExecutionMode(this.db, workspace) === 'container'
+          ? this.containerRunner
+          : this.runner;
+        const result = await executionRunner.run(request, (event) => {
           events.push(event);
           this.persistAndPublish(inbox.sessionId, turnId, nextOrdinal, event);
           nextOrdinal += 1;

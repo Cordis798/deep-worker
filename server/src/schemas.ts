@@ -29,12 +29,14 @@ export const updateAgentProfileSchema = z
 export const createWorkspaceSchema = z.object({
   name: nonEmptyString('名称', 120),
   agent_profile_id: z.string().optional().nullable(),
+  execution_mode: z.enum(['host', 'container']).optional(),
 });
 
 export const updateWorkspaceSchema = z
   .object({
     name: nonEmptyString('名称', 120).optional(),
     agent_profile_id: z.string().optional().nullable(),
+    execution_mode: z.enum(['host', 'container']).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {
     message: '至少需要提供一个可修改字段',

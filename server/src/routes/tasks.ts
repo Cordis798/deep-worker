@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Hono } from 'hono';
 import { authMiddleware } from '../middleware/auth.js';
 import { getOwnedWorkspace } from '../workspaces.js';
+import { effectiveExecutionMode } from '../execution-policy.js';
 import { TaskService } from '../task-service.js';
 import type { AppVariables } from '../types.js';
 import type { TaskExecutionType, TaskScheduleType, TaskContextMode } from '../task-store.js';
@@ -61,7 +62,7 @@ export function createTaskRoutes(service: TaskService, db: Parameters<typeof get
     const workspace = getOwnedWorkspace(db, user.id, workspaceJid);
     if (!workspace) return c.json({ error: '工作区不存在' }, 404);
     const executionType = body.execution_type as TaskExecutionType;
-    if (executionType === 'script' && (user.role !== 'admin' || workspace.execution_mode !== 'host')) {
+    if (executionType === 'script' && (user.role !== 'admin' || effectiveExecutionMode(db, workspace) !== 'host')) {
       return c.json({ error: '脚本任务只允许管理员在 Host 工作区执行' }, 403);
     }
     try {
@@ -96,7 +97,7 @@ export function createTaskRoutes(service: TaskService, db: Parameters<typeof get
     if (!Number.isInteger(expectedRevision)) return c.json({ error: 'expected_revision 必须是整数' }, 400);
     const executionType = (body.execution_type as TaskExecutionType | undefined) ?? task.execution_type;
     const workspace = getOwnedWorkspace(db, user.id, task.workspace_jid);
-    if (executionType === 'script' && (user.role !== 'admin' || workspace?.execution_mode !== 'host')) {
+    if (executionType === 'script' && (user.role !== 'admin' || !workspace || effectiveExecutionMode(db, workspace) !== 'host')) {
       return c.json({ error: '脚本任务只允许管理员在 Host 工作区执行' }, 403);
     }
     try {

@@ -34,6 +34,7 @@ import {
 } from '../workspaces.js';
 import type { Db } from '../workspaces.js';
 import type { AppVariables } from '../types.js';
+import { resolveRequestedExecutionMode } from '../execution-policy.js';
 
 export function createWorkspaceRoutes(db: Db) {
   const app = new Hono<{ Variables: AppVariables }>();
@@ -53,9 +54,12 @@ export function createWorkspaceRoutes(db: Db) {
     if (!parsed.success) {
       return c.json({ error: formatZodError(parsed.error) }, 400);
     }
+    const execution = resolveRequestedExecutionMode(db, user.id, parsed.data.execution_mode);
+    if (!execution.ok) return c.json({ error: '普通成员不能降级为 Host 执行' }, 403);
     const row = createWorkspace(db, user.id, {
       name: parsed.data.name,
       agent_profile_id: parsed.data.agent_profile_id,
+      execution_mode: parsed.data.execution_mode,
     });
     if (!row) return c.json({ error: 'Agent profile not found' }, 404);
     return c.json({ workspace: toWorkspacePublic(row) }, 201);
@@ -89,6 +93,7 @@ export function createWorkspaceRoutes(db: Db) {
           409,
         );
       }
+      if (result.reason === 'host_forbidden') return c.json({ error: '普通成员不能降级为 Host 执行' }, 403);
       return c.json({ error: 'Workspace not found' }, 404);
     }
     const row = getOwnedWorkspace(db, user.id, c.req.param('jid'))!;

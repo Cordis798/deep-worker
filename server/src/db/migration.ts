@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 export class MigrationError extends Error {}
 
@@ -540,6 +540,18 @@ function createTaskMemoryTables(db: Database.Database): void {
   `);
 }
 
+function migrateExecutionPolicy(db: Database.Database): void {
+  // 历史 Host 工作区只对仍然具备管理员权限的所有者保留。
+  db.prepare(
+    `UPDATE workspaces SET execution_mode = 'container'
+     WHERE execution_mode = 'host' AND (
+       owner_user_id IS NULL OR owner_user_id IN (
+         SELECT id FROM users WHERE role != 'admin' OR status != 'active' OR deleted_at IS NOT NULL
+       )
+     )`,
+  ).run();
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
@@ -549,6 +561,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 6, name: 'channel_reliability_tables', up: createChannelReliabilityTables },
   { version: 7, name: 'capability_tables', up: createCapabilityTables },
   { version: 8, name: 'task_memory_tables', up: createTaskMemoryTables },
+  { version: 9, name: 'execution_policy', up: migrateExecutionPolicy },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {

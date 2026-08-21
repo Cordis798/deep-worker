@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3';
 import type { RuntimeRunnerService } from './runtime-runner-service.js';
 import { getOwnedWorkspace } from './workspaces.js';
 import { getUserById } from './users.js';
+import { effectiveExecutionMode } from './execution-policy.js';
 import {
   claimNextRun,
   completeRun,
@@ -91,7 +92,7 @@ export class TaskService {
     if (input.executionType === 'script') {
       const owner = getUserById(this.db, input.ownerUserId);
       const workspace = getOwnedWorkspace(this.db, input.ownerUserId, input.workspaceJid);
-      if (owner?.role !== 'admin' || workspace?.execution_mode !== 'host') {
+      if (owner?.role !== 'admin' || !workspace || effectiveExecutionMode(this.db, workspace) !== 'host') {
         throw new Error('脚本任务只允许管理员在 Host 工作区执行');
       }
     }
@@ -196,7 +197,7 @@ export class TaskService {
     if (owner?.role !== 'admin' || !workspace || workspace.status !== 'active') {
       throw new Error('脚本任务只允许管理员在 Host 工作区执行');
     }
-    if (workspace.execution_mode !== 'host') throw new Error('当前工作区不是 Host 执行模式');
+    if (effectiveExecutionMode(this.db, workspace) !== 'host') throw new Error('当前工作区不是 Host 执行模式');
     const command = task.script_command?.trim();
     if (!command) throw new Error('脚本命令为空');
     fs.mkdirSync(workspace.folder, { recursive: true });
