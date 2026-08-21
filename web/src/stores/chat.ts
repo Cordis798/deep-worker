@@ -13,6 +13,15 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+export const EMPTY_MESSAGES: ChatMessage[] = [];
+
+export function selectSessionMessages(
+  state: Pick<ChatState, 'messages'>,
+  sessionId: string | null,
+) {
+  return sessionId ? (state.messages[sessionId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES;
+}
+
 interface ActiveTurn {
   workspaceId: string;
   sessionId: string;
@@ -52,10 +61,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const userId = `user-${crypto.randomUUID()}`;
     const assistantId = `assistant-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
-    const userMessage: ChatMessage = { id: userId, role: 'user', text: content, thinking: '', events: [], status: 'complete', createdAt: now };
-    const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', text: '', thinking: '', events: [], status: 'streaming', createdAt: now };
+    const userMessage: ChatMessage = {
+      id: userId,
+      role: 'user',
+      text: content,
+      thinking: '',
+      events: [],
+      status: 'complete',
+      createdAt: now,
+    };
+    const assistantMessage: ChatMessage = {
+      id: assistantId,
+      role: 'assistant',
+      text: '',
+      thinking: '',
+      events: [],
+      status: 'streaming',
+      createdAt: now,
+    };
     set((state) => ({
-      messages: { ...state.messages, [messageKey(sessionId)]: [...(state.messages[messageKey(sessionId)] ?? []), userMessage, assistantMessage] },
+      messages: {
+        ...state.messages,
+        [messageKey(sessionId)]: [
+          ...(state.messages[messageKey(sessionId)] ?? []),
+          userMessage,
+          assistantMessage,
+        ],
+      },
       sendError: { ...state.sendError, [sessionId]: null },
     }));
 
@@ -65,17 +97,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         { message: content, idempotency_key: `${sessionId}:${crypto.randomUUID()}` },
       );
       let terminal = false;
-      const stream = openTurnStream(workspaceId, sessionId, response.turn.id, {
+      let streamClosed = false;
+      let stream: ReturnType<typeof openTurnStream> | null = null;
+      stream = openTurnStream(workspaceId, sessionId, response.turn.id, {
         onEvent: (event) => {
           set((state) => {
             const current = state.messages[messageKey(sessionId)] ?? [];
             const next = updateAssistant(current, assistantId, (message) => {
-              const isTerminal = event.eventType === 'status' && event.statusText !== 'agent started';
+              const isTerminal =
+                event.eventType === 'status' && event.statusText !== 'agent started';
               if (isTerminal) terminal = true;
               return {
                 ...message,
-                text: event.eventType === 'text_delta' ? `${message.text}${event.text ?? ''}` : message.text,
-                thinking: event.eventType === 'thinking_delta' ? `${message.thinking}${event.text ?? ''}` : message.thinking,
+                text:
+                  event.eventType === 'text_delta'
+                    ? `${message.text}${event.text ?? ''}`
+                    : message.text,
+                thinking:
+                  event.eventType === 'thinking_delta'
+                    ? `${message.thinking}${event.text ?? ''}`
+                    : message.thinking,
                 events: [...message.events, event],
                 status: isTerminal ? 'complete' : message.status,
               };
@@ -83,7 +124,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             return { messages: { ...state.messages, [messageKey(sessionId)]: next } };
           });
           if (terminal) {
-            stream.close();
+            stream?.close();
             set((state) => {
               const nextTurns = { ...state.activeTurns };
               delete nextTurns[sessionId];
@@ -92,21 +133,54 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         },
         onError: () => {
-          set((state) => ({ sendError: { ...state.sendError, [sessionId]: '聊天连接失败，正在尝试恢复…' } }));
+          set((state) => ({
+            sendError: { ...state.sendError, [sessionId]: '聊天连接失败，正在尝试恢复…' },
+          }));
         },
         onClose: () => {
           if (terminal) return;
+          streamClosed = true;
           set((state) => ({
-            messages: { ...state.messages, [messageKey(sessionId)]: updateAssistant(state.messages[messageKey(sessionId)] ?? [], assistantId, (message) => ({ ...message, status: 'error' })) },
+            messages: {
+              ...state.messages,
+              [messageKey(sessionId)]: updateAssistant(
+                state.messages[messageKey(sessionId)] ?? [],
+                assistantId,
+                (message) => ({ ...message, status: 'error' }),
+              ),
+            },
             sendError: { ...state.sendError, [sessionId]: '聊天流已断开，请重试' },
-            activeTurns: Object.fromEntries(Object.entries(state.activeTurns).filter(([key]) => key !== sessionId)),
+            activeTurns: Object.fromEntries(
+              Object.entries(state.activeTurns).filter(([key]) => key !== sessionId),
+            ),
           }));
         },
       });
-      set((state) => ({ activeTurns: { ...state.activeTurns, [sessionId]: { workspaceId, sessionId, turnId: response.turn.id, close: stream.close } } }));
+      if (terminal || streamClosed) {
+        stream.close();
+        return;
+      }
+      set((state) => ({
+        activeTurns: {
+          ...state.activeTurns,
+          [sessionId]: {
+            workspaceId,
+            sessionId,
+            turnId: response.turn.id,
+            close: stream.close,
+          },
+        },
+      }));
     } catch (error) {
       set((state) => ({
-        messages: { ...state.messages, [messageKey(sessionId)]: updateAssistant(state.messages[messageKey(sessionId)] ?? [], assistantId, (message) => ({ ...message, status: 'error' })) },
+        messages: {
+          ...state.messages,
+          [messageKey(sessionId)]: updateAssistant(
+            state.messages[messageKey(sessionId)] ?? [],
+            assistantId,
+            (message) => ({ ...message, status: 'error' }),
+          ),
+        },
         sendError: { ...state.sendError, [sessionId]: getErrorMessage(error, '发送失败') },
       }));
     }
@@ -116,14 +190,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const active = get().activeTurns[sessionId];
     active?.close();
     set((state) => ({
-      messages: { ...state.messages, [messageKey(sessionId)]: (state.messages[messageKey(sessionId)] ?? []).map((message) => message.status === 'streaming' ? { ...message, status: 'stopped' } : message) },
-      activeTurns: Object.fromEntries(Object.entries(state.activeTurns).filter(([key]) => key !== sessionId)),
+      messages: {
+        ...state.messages,
+        [messageKey(sessionId)]: (state.messages[messageKey(sessionId)] ?? []).map((message) =>
+          message.status === 'streaming' ? { ...message, status: 'stopped' } : message,
+        ),
+      },
+      activeTurns: Object.fromEntries(
+        Object.entries(state.activeTurns).filter(([key]) => key !== sessionId),
+      ),
     }));
   },
 
-  clearSession: (sessionId) => set((state) => {
-    const messages = { ...state.messages };
-    delete messages[messageKey(sessionId)];
-    return { messages };
-  }),
+  clearSession: (sessionId) =>
+    set((state) => {
+      const messages = { ...state.messages };
+      delete messages[messageKey(sessionId)];
+      return { messages };
+    }),
 }));

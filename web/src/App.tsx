@@ -96,6 +96,8 @@ export function createAppRouter() {
   return createBrowserRouter(routes);
 }
 
+const appRouter = createAppRouter();
+
 export function App() {
-  return <RouterProvider router={createAppRouter()} />;
+  return <RouterProvider router={appRouter} />;
 }
