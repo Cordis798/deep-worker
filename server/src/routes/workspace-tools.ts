@@ -1,5 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import crypto from 'node:crypto';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { NodeWebSocket } from '@hono/node-ws';
@@ -8,19 +7,11 @@ import { DATA_DIR } from '../config.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { getOwnedWorkspace } from '../workspaces.js';
 import type { AppVariables } from '../types.js';
+import { extractFileText, FileTextError } from '../file-text-extractor.js';
+import { TerminalManager } from '../terminal-manager.js';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_TEXT_BYTES = 5 * 1024 * 1024;
-
-interface TerminalSession {
-  id: string;
-  ownerUserId: string;
-  workspaceJid: string;
-  process: ChildProcessWithoutNullStreams;
-  output: string;
-  status: 'running' | 'exited' | 'failed';
-  listeners: Set<(message: unknown) => void>;
-}
 
 function workspaceRoot(jid: string) {
   const safeJid = jid.replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -41,6 +32,20 @@ function safePath(root: string, relative: string) {
   const resolved = path.resolve(root, ...relative.split('/'));
   if (resolved !== resolvedRoot && !resolved.startsWith(`${resolvedRoot}${path.sep}`)) {
     throw new Error('路径不能越过工作区目录');
+  }
+  const realRoot = fsSync.existsSync(resolvedRoot)
+    ? fsSync.realpathSync(resolvedRoot)
+    : resolvedRoot;
+  let candidate = resolved;
+  while (candidate !== resolvedRoot && candidate !== path.dirname(candidate)) {
+    if (fsSync.existsSync(candidate)) {
+      const realCandidate = fsSync.realpathSync(candidate);
+      if (realCandidate !== realRoot && !realCandidate.startsWith(`${realRoot}${path.sep}`)) {
+        throw new Error('路径不能越过工作区目录');
+      }
+      break;
+    }
+    candidate = path.dirname(candidate);
   }
   return resolved;
 }
@@ -76,19 +81,6 @@ async function listFiles(root: string, currentPath: string) {
   });
 }
 
-function findTerminal(
-  sessions: Map<string, TerminalSession>,
-  db: Parameters<typeof getOwnedWorkspace>[0],
-  userId: string,
-  jid: string,
-  sessionId: string,
-) {
-  const workspace = getOwnedWorkspace(db, userId, jid);
-  const terminal = sessions.get(sessionId);
-  if (!workspace || !terminal || terminal.ownerUserId !== userId || terminal.workspaceJid !== jid) return undefined;
-  return terminal;
-}
-
 export type WorkspaceToolsRoutes = Hono<{ Variables: AppVariables }> & { close: () => Promise<void> };
 
 export function createWorkspaceToolsRoutes(
@@ -96,7 +88,7 @@ export function createWorkspaceToolsRoutes(
   upgradeWebSocket?: NodeWebSocket['upgradeWebSocket'],
 ): WorkspaceToolsRoutes {
   const app = new Hono<{ Variables: AppVariables }>();
-  const terminals = new Map<string, TerminalSession>();
+  const terminals = new TerminalManager();
   app.use('*', authMiddleware(db));
 
   app.get('/:jid/files', async (c) => {
@@ -161,10 +153,10 @@ export function createWorkspaceToolsRoutes(
     try {
       const relative = relativePath(decodePath(c.req.param('encodedPath')));
       const file = safePath(workspaceRoot(workspace.jid), relative);
-      const stat = await fs.stat(file);
-      if (!stat.isFile() || stat.size > MAX_TEXT_BYTES) return c.json({ error: '文件不可读取或过大' }, 400);
-      return c.json({ content: await fs.readFile(file, 'utf8'), path: relative });
+      const extracted = await extractFileText(file);
+      return c.json({ content: extracted.text, truncated: extracted.truncated, method: extracted.method, path: relative });
     } catch (error) {
+      if (error instanceof FileTextError) return c.json({ error: error.message, code: error.code }, error.code === 'unsupported' ? 415 : 400);
       return c.json({ error: error instanceof Error ? error.message : '读取文件失败' }, 404);
     }
   });
@@ -222,7 +214,7 @@ export function createWorkspaceToolsRoutes(
     const user = c.get('user')!;
     const workspace = getOwnedWorkspace(db, user.id, c.req.param('jid'));
     if (!workspace) return c.json({ error: 'Workspace not found' }, 404);
-    return c.json({ sessions: [...terminals.values()].filter((session) => session.ownerUserId === user.id && session.workspaceJid === workspace.jid).map((session) => ({ id: session.id, status: session.status, degraded: true })) });
+    return c.json({ sessions: terminals.list(user.id, workspace.jid) });
   });
 
   app.post('/:jid/terminal-sessions', async (c) => {
@@ -231,63 +223,46 @@ export function createWorkspaceToolsRoutes(
     if (!workspace) return c.json({ error: 'Workspace not found' }, 404);
     const root = workspaceRoot(workspace.jid);
     await ensureRoot(root);
-    const id = `term_${crypto.randomUUID()}`;
-    const shell = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : (process.env.SHELL ?? '/bin/sh');
-    const child = spawn(shell, [], { cwd: root, env: process.env, stdio: 'pipe' });
-    const session: TerminalSession = { id, ownerUserId: user.id, workspaceJid: workspace.jid, process: child, output: '', status: 'running', listeners: new Set() };
-    terminals.set(id, session);
-    const publish = (message: unknown) => session.listeners.forEach((listener) => listener(message));
-    const appendOutput = (data: Buffer) => {
-      session.output = `${session.output}${data.toString('utf8')}`.slice(-200_000);
-      publish({ type: 'output', data: data.toString('utf8') });
-    };
-    child.stdout.on('data', appendOutput);
-    child.stderr.on('data', appendOutput);
-    child.on('error', (error) => { session.status = 'failed'; publish({ type: 'status', status: 'failed', error: error.message }); });
-    child.on('exit', (code) => { session.status = 'exited'; publish({ type: 'status', status: 'exited', code }); });
-    return c.json({ session: { id, status: session.status, shell: path.basename(shell), degraded: true, notice: '当前使用 Node 子进程流，暂不提供真实 PTY 的窗口大小控制。' } }, 201);
+    const session = terminals.start(user.id, workspace.jid, root);
+    return c.json({ session: { id: session.id, status: session.status, shell: terminals.shellName(), degraded: true, notice: '当前使用 Node 子进程流，暂不提供真实 PTY 的窗口大小控制。' } }, 201);
   });
 
   app.delete('/:jid/terminal-sessions/:sessionId', (c) => {
     const user = c.get('user')!;
-    const session = findTerminal(terminals, db, user.id, c.req.param('jid'), c.req.param('sessionId'));
-    if (!session) return c.json({ error: 'Terminal session not found' }, 404);
-    session.process.kill();
-    terminals.delete(session.id);
-    return c.json({ success: true });
+    const ok = terminals.close(user.id, c.req.param('jid'), c.req.param('sessionId'));
+    return ok ? c.json({ success: true }) : c.json({ error: 'Terminal session not found' }, 404);
   });
 
   if (upgradeWebSocket) {
     app.get('/:jid/terminal-sessions/:sessionId/stream', upgradeWebSocket((c) => {
       const user = c.get('user')!;
-      const session = findTerminal(terminals, db, user.id, c.req.param('jid') ?? '', c.req.param('sessionId') ?? '');
-      let listener: ((message: unknown) => void) | undefined;
+      const session = terminals.getForOwner(user.id, c.req.param('jid') ?? '', c.req.param('sessionId') ?? '');
+      let unsubscribe: (() => void) | undefined;
       return {
         onOpen: (_event, ws) => {
           if (!session) { ws.close(4404, 'Terminal session not found'); return; }
-          ws.send(JSON.stringify({ type: 'snapshot', data: session.output, status: session.status }));
-          listener = (message) => ws.send(JSON.stringify(message));
-          session.listeners.add(listener);
+          const snapshot = terminals.snapshot(session);
+          ws.send(JSON.stringify({ type: 'snapshot', data: snapshot.output, status: snapshot.status }));
+          unsubscribe = terminals.subscribe(session, (message) => ws.send(JSON.stringify(message)));
         },
         onMessage: (event) => {
           if (!session || typeof event.data !== 'string') return;
           try {
             const message = JSON.parse(event.data) as { type?: string; data?: string };
-            if (message.type === 'input' && typeof message.data === 'string' && session.status === 'running') session.process.stdin.write(message.data);
+            if (message.type === 'input' && typeof message.data === 'string') terminals.write(session, message.data);
             if (message.type === 'close') session.process.kill();
           } catch {
             // 忽略格式错误的终端消息，不让连接中断。
           }
         },
-        onClose: () => { if (session && listener) session.listeners.delete(listener); },
+      onClose: () => { unsubscribe?.(); },
       };
     }));
   }
 
   return Object.assign(app, {
     close: async () => {
-      for (const session of terminals.values()) session.process.kill();
-      terminals.clear();
+      terminals.closeAll();
     },
   });
 }
