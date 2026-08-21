@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  hostName,
-  redactConfig,
-  resolveConfig,
-  webPort,
-} from './config.js';
+import { hostName, redactConfig, resolveConfig, runnerMode, webPort } from './config.js';
 
 describe('config', () => {
   it('resolves persistent setting over env over default', () => {
@@ -22,6 +17,12 @@ describe('config', () => {
   it('reads HOST from env with a default', () => {
     expect(hostName({ HOST: '127.0.0.1' })).toBe('127.0.0.1');
     expect(hostName({})).toBe('0.0.0.0');
+  });
+
+  it('only enables the deterministic runner with an explicit fake mode', () => {
+    expect(runnerMode({ DEEP_WORKER_RUNNER: 'fake' })).toBe('fake');
+    expect(runnerMode({ DEEP_WORKER_RUNNER: 'pi' })).toBe('pi');
+    expect(runnerMode({})).toBe('pi');
   });
 
   it('redacts sensitive config keys', () => {

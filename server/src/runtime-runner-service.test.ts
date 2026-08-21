@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { FakePiRunner } from '@deep-worker/pi-runner';
+import type { AgentRunner } from '@deep-worker/pi-runner';
 import { initDatabase } from './db/migration.js';
 import {
   claimRunnerTurn,
@@ -104,9 +105,26 @@ describe('RuntimeRunnerService', () => {
   });
 
   it('allows different sessions to run concurrently', async () => {
-    const runner = new FakePiRunner({ delayMs: 30 });
+    let active = 0;
+    let maxActive = 0;
+    const runner: AgentRunner = {
+      async run(request) {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise<void>((resolve) => setTimeout(resolve, 30));
+        active -= 1;
+        return {
+          sessionId: request.sessionId,
+          reply: request.message,
+          events: [],
+          attempts: 1,
+        };
+      },
+      async close() {
+        // 测试运行器不持有外部资源。
+      },
+    };
     const service = new RuntimeRunnerService({ db, runner, retryBaseMs: 0 });
-    const started = Date.now();
     await Promise.all([
       service.submit({
         ownerUserId: 'u1',
@@ -123,7 +141,7 @@ describe('RuntimeRunnerService', () => {
         idempotencyKey: 'b',
       }),
     ]);
-    expect(Date.now() - started).toBeLessThan(55);
+    expect(maxActive).toBe(2);
     await service.close();
   });
 

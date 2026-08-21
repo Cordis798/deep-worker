@@ -11,6 +11,7 @@ export const DEFAULT_WEB_PORT = 3000;
 export const DEFAULT_HOST = '0.0.0.0';
 export const DEFAULT_LOG_LEVEL = 'info';
 export const DEFAULT_TIMEZONE = 'Asia/Shanghai';
+export type RunnerMode = 'pi' | 'fake';
 export const SESSION_COOKIE_NAME_SECURE = '__Host-dw_session';
 export const SESSION_COOKIE_NAME_PLAIN = 'dw_session';
 const SESSION_SECRET_FILE = path.join(DATA_DIR, 'config', 'session-secret.key');
@@ -33,16 +34,16 @@ export function timezone(env: NodeJS.ProcessEnv = process.env): string {
   return env.TZ || DEFAULT_TIMEZONE;
 }
 
+export function runnerMode(env: NodeJS.ProcessEnv = process.env): RunnerMode {
+  return env.DEEP_WORKER_RUNNER === 'fake' ? 'fake' : 'pi';
+}
+
 /**
  * Layered config resolution: web-persisted settings win over environment
  * variables, which win over built-in defaults. Persistent settings are wired
  * to the config_kv database in a later stage; callers pass null until then.
  */
-export function resolveConfig<T>(
-  persistent: unknown,
-  env: unknown,
-  fallback: T,
-): T {
+export function resolveConfig<T>(persistent: unknown, env: unknown, fallback: T): T {
   const value = persistent ?? env ?? fallback;
   return value as T;
 }
@@ -58,9 +59,7 @@ export function isSensitiveConfigKey(key: string): boolean {
  * Mask secret-bearing configuration values so a config dump can be logged
  * without leaking credentials.
  */
-export function redactConfig(
-  input: Record<string, unknown>,
-): Record<string, unknown> {
+export function redactConfig(input: Record<string, unknown>): Record<string, unknown> {
   const output: Record<string, unknown> = { ...input };
   for (const key of Object.keys(output)) {
     if (isSensitiveConfigKey(key)) {
@@ -116,16 +115,12 @@ export function maxLoginAttempts(env: NodeJS.ProcessEnv = process.env): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 5;
 }
 
-export function loginLockoutMinutes(
-  env: NodeJS.ProcessEnv = process.env,
-): number {
+export function loginLockoutMinutes(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number.parseInt(env.LOGIN_LOCKOUT_MINUTES ?? '', 10);
   return Number.isFinite(raw) && raw > 0 ? raw : 15;
 }
 
-export function allowRegistration(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
+export function allowRegistration(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.ALLOW_REGISTRATION !== 'false';
 }
 

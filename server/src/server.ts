@@ -1,6 +1,7 @@
 import { serve as serveHono, type ServerType } from '@hono/node-server';
+import { FakePiRunner } from '@deep-worker/pi-runner';
 import { createApp, type App } from './app.js';
-import { hostName, webPort } from './config.js';
+import { hostName, runnerMode, webPort } from './config.js';
 import { openDatabase } from './db/index.js';
 import { logger } from './logger.js';
 
@@ -59,7 +60,9 @@ export async function main(): Promise<void> {
   }
   if (!db) process.exit(1);
 
-  const app = createApp({ db });
+  const runner =
+    runnerMode() === 'fake' ? new FakePiRunner({ emitBash: true, emitUsage: true }) : undefined;
+  const app = createApp({ db, runner });
   let handle: ServerHandle;
   try {
     handle = await startServer({ app, port: webPort(), host: hostName() });

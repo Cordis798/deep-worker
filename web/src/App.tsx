@@ -9,7 +9,7 @@ import { AuthGuard, PublicOnly } from './components/auth/AuthGuard.js';
 import { AppLayout } from './components/layout/AppLayout.js';
 import { LoginPage } from './pages/LoginPage.js';
 import { RegisterPage } from './pages/RegisterPage.js';
-import { RoutePlaceholder } from './pages/RoutePlaceholder.js';
+import { IntegrationSetupPage } from './pages/IntegrationSetupPage.js';
 import { CapabilitiesPage } from './pages/CapabilitiesPage.js';
 import { AgentBuilderPage } from './pages/AgentBuilderPage.js';
 import { SetupPage } from './pages/SetupPage.js';
@@ -27,20 +27,56 @@ import { BillingPage } from './pages/BillingPage.js';
 
 const routes = createRoutesFromElements(
   <>
-    <Route path="/login" element={<PublicOnly><LoginPage /></PublicOnly>} />
-    <Route path="/register" element={<PublicOnly><RegisterPage /></PublicOnly>} />
+    <Route
+      path="/login"
+      element={
+        <PublicOnly>
+          <LoginPage />
+        </PublicOnly>
+      }
+    />
+    <Route
+      path="/register"
+      element={
+        <PublicOnly>
+          <RegisterPage />
+        </PublicOnly>
+      }
+    />
     <Route path="/setup" element={<SetupPage />} />
-    <Route path="/setup/providers" element={<AuthGuard><RoutePlaceholder title="配置 Provider" /></AuthGuard>} />
-    <Route path="/setup/channels" element={<AuthGuard><RoutePlaceholder title="配置渠道" /></AuthGuard>} />
-    <Route element={<AuthGuard><AppLayout /></AuthGuard>}>
+    <Route
+      element={
+        <AuthGuard>
+          <AppLayout />
+        </AuthGuard>
+      }
+    >
       <Route path="/chat/:workspaceId?" element={<ChatPage />} />
       <Route path="/groups" element={<Navigate to="/chat" replace />} />
       <Route path="/agent-profiles" element={<AgentProfilesPage />} />
       <Route path="/files" element={<FilesPage />} />
       <Route path="/terminal" element={<TerminalPage />} />
       <Route path="/settings" element={<SettingsPage />} />
-      <Route path="/monitor" element={<AuthGuard requiredPermission="manage_system_config"><MonitorPage /></AuthGuard>} />
-      <Route path="/users" element={<AuthGuard requiredAnyPermissions={['manage_users', 'manage_invites', 'view_audit_log']}><UsersPage /></AuthGuard>} />
+      <Route path="/setup/providers" element={<IntegrationSetupPage mode="providers" />} />
+      <Route path="/setup/channels" element={<IntegrationSetupPage mode="channels" />} />
+      <Route
+        path="/monitor"
+        element={
+          <AuthGuard requiredPermission="manage_system_config">
+            <MonitorPage />
+          </AuthGuard>
+        }
+      />
+      <Route
+        path="/users"
+        element={
+          <AuthGuard
+            requiredAnyPermissions={['manage_users', 'manage_invites', 'view_audit_log']}
+          >
+            <UsersPage />
+          </AuthGuard>
+        }
+      />
       <Route path="/capabilities/:section?" element={<CapabilitiesPage />} />
       <Route path="/agent-builder" element={<AgentBuilderPage />} />
       <Route path="/tasks" element={<TasksPage />} />

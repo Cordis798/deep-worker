@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">Deep Worker 架构与消息闭环</title>
+  <desc id="desc">浏览器、Hono 服务端、可恢复队列、Pi Runner、SQLite 和渠道之间的消息流</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1200" y2="520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0b1020"/>
+      <stop offset="1" stop-color="#172554"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="m0 0 10 5-10 5Z" fill="#a5b4fc"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="520" rx="32" fill="url(#background)"/>
+  <text x="64" y="68" fill="#fff" font-family="Inter,Segoe UI,sans-serif" font-size="28" font-weight="700">Deep Worker · 可恢复的 Agent 工作台</text>
+  <text x="64" y="98" fill="#a5b4fc" font-family="Inter,Segoe UI,sans-serif" font-size="15">消息进入 → 按 Session 串行 → Pi 执行 → 流式事件 → durable reply</text>
+  <g font-family="Inter,Segoe UI,sans-serif">
+    <rect x="64" y="166" width="190" height="118" rx="20" fill="#fff"/>
+    <text x="88" y="207" fill="#0f172a" font-size="18" font-weight="700">Web / PWA</text>
+    <text x="88" y="237" fill="#64748b" font-size="14">Chat · Files · Usage</text>
+    <text x="88" y="260" fill="#64748b" font-size="14">WebSocket 流式事件</text>
+
+    <rect x="326" y="140" width="220" height="170" rx="20" fill="#111827" stroke="#6366f1" stroke-width="2"/>
+    <text x="354" y="183" fill="#fff" font-size="18" font-weight="700">Hono 服务端</text>
+    <text x="354" y="214" fill="#c7d2fe" font-size="14">认证 · ACL · API</text>
+    <text x="354" y="238" fill="#c7d2fe" font-size="14">Inbox / Turn / Outbox</text>
+    <text x="354" y="262" fill="#c7d2fe" font-size="14">Usage / Billing / Tasks</text>
+
+    <rect x="620" y="140" width="220" height="170" rx="20" fill="#111827" stroke="#22d3ee" stroke-width="2"/>
+    <text x="648" y="183" fill="#fff" font-size="18" font-weight="700">Pi Runner</text>
+    <text x="648" y="214" fill="#cffafe" font-size="14">SessionQueue</text>
+    <text x="648" y="238" fill="#cffafe" font-size="14">Pi RPC / Fake Pi</text>
+    <text x="648" y="262" fill="#cffafe" font-size="14">bash · StreamEvent</text>
+
+    <rect x="914" y="166" width="220" height="118" rx="20" fill="#fff"/>
+    <text x="942" y="207" fill="#0f172a" font-size="18" font-weight="700">SQLite</text>
+    <text x="942" y="237" fill="#64748b" font-size="14">状态机 · 汇总 · 审计</text>
+    <text x="942" y="260" fill="#64748b" font-size="14">备份与重启恢复</text>
+
+    <path d="M254 225h68" stroke="#a5b4fc" stroke-width="3" marker-end="url(#arrow)"/>
+    <path d="M546 225h68" stroke="#a5b4fc" stroke-width="3" marker-end="url(#arrow)"/>
+    <path d="M840 225h68" stroke="#a5b4fc" stroke-width="3" marker-end="url(#arrow)"/>
+    <path d="M724 310v82H438" stroke="#a5b4fc" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+    <path d="M438 392V310" stroke="#a5b4fc" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+    <rect x="326" y="392" width="220" height="70" rx="18" fill="url(#accent)"/>
+    <text x="359" y="435" fill="#fff" font-size="17" font-weight="700">渠道 / 定时任务</text>
+  </g>
+</svg>
