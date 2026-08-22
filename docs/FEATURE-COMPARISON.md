@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | Web/PWA 工作台 | 通过 | React 路由、manifest、Service Worker、响应式布局已存在。 |
 | 流式聊天、工具轨迹、Markdown | 通过 | Pi StreamEvent、WebSocket、Chat 页面和 Runner 测试。 |
-| 图片/文件/终端 | 通过 | Workspace Tools、文件页、PTY 终端页和对应测试。 |
+| 图片/文件 | 通过 | Workspace Tools、文件页和对应测试。 |
 | Agent Profile / Workspace / Runtime Session | 通过 | 领域表、CRUD、所有权和运行链路测试。 |
 | 飞书、Telegram、QQ、钉钉、微信、Discord、WhatsApp | 外部验收 | 七类适配器和 Fake Transport 测试通过；真实账号连接需人工提供凭据。 |
 | 定时任务与恢复 | 通过 | Cron/间隔/一次性、幂等运行、租约恢复和通知状态测试。 |
