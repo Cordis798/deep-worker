@@ -1,13 +1,11 @@
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { NodeWebSocket } from '@hono/node-ws';
 import { Hono } from 'hono';
 import { authMiddleware } from '../middleware/auth.js';
 import { getOwnedWorkspace, workspaceRoot } from '../workspaces.js';
 import type { AppVariables } from '../types.js';
 import { extractFileText, FileTextError } from '../file-text-extractor.js';
-import { TerminalManager } from '../terminal-manager.js';
 
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_TEXT_BYTES = 5 * 1024 * 1024;
@@ -75,14 +73,10 @@ async function listFiles(root: string, currentPath: string) {
   });
 }
 
-export type WorkspaceToolsRoutes = Hono<{ Variables: AppVariables }> & { close: () => Promise<void> };
+export type WorkspaceToolsRoutes = Hono<{ Variables: AppVariables }>;
 
-export function createWorkspaceToolsRoutes(
-  db: Parameters<typeof getOwnedWorkspace>[0],
-  upgradeWebSocket?: NodeWebSocket['upgradeWebSocket'],
-): WorkspaceToolsRoutes {
+export function createWorkspaceToolsRoutes(db: Parameters<typeof getOwnedWorkspace>[0]): WorkspaceToolsRoutes {
   const app = new Hono<{ Variables: AppVariables }>();
-  const terminals = new TerminalManager();
   app.use('*', authMiddleware(db));
 
   app.get('/:jid/files', async (c) => {
@@ -204,71 +198,5 @@ export function createWorkspaceToolsRoutes(
     }
   });
 
-  app.get('/:jid/terminal-sessions', (c) => {
-    const user = c.get('user')!;
-    const workspace = getOwnedWorkspace(db, user.id, c.req.param('jid'));
-    if (!workspace) return c.json({ error: 'Workspace not found' }, 404);
-    return c.json({ sessions: terminals.list(user.id, workspace.jid) });
-  });
-
-  app.post('/:jid/terminal-sessions', async (c) => {
-    const user = c.get('user')!;
-    const workspace = getOwnedWorkspace(db, user.id, c.req.param('jid'));
-    if (!workspace) return c.json({ error: 'Workspace not found' }, 404);
-    const root = workspaceRoot(workspace.jid);
-    await ensureRoot(root);
-    const session = terminals.start(user.id, workspace.jid, root);
-    return c.json({
-      session: {
-        id: session.id,
-        status: session.status,
-        shell: terminals.shellName(),
-        mode: session.mode,
-        degraded: session.mode !== 'pty',
-        ...(session.mode === 'pty' ? {} : { notice: '当前环境不支持原生 PTY，已回退到标准输入输出流。' }),
-      },
-    }, 201);
-  });
-
-  app.delete('/:jid/terminal-sessions/:sessionId', (c) => {
-    const user = c.get('user')!;
-    const ok = terminals.close(user.id, c.req.param('jid'), c.req.param('sessionId'));
-    return ok ? c.json({ success: true }) : c.json({ error: 'Terminal session not found' }, 404);
-  });
-
-  if (upgradeWebSocket) {
-    app.get('/:jid/terminal-sessions/:sessionId/stream', upgradeWebSocket((c) => {
-      const user = c.get('user')!;
-      const session = terminals.getForOwner(user.id, c.req.param('jid') ?? '', c.req.param('sessionId') ?? '');
-      let unsubscribe: (() => void) | undefined;
-      return {
-        onOpen: (_event, ws) => {
-          if (!session) { ws.close(4404, 'Terminal session not found'); return; }
-          const snapshot = terminals.snapshot(session);
-          ws.send(JSON.stringify({ type: 'snapshot', data: snapshot.output, status: snapshot.status, mode: snapshot.mode }));
-          unsubscribe = terminals.subscribe(session, (message) => ws.send(JSON.stringify(message)));
-        },
-        onMessage: (event) => {
-          if (!session || typeof event.data !== 'string') return;
-          try {
-            const message = JSON.parse(event.data) as { type?: string; data?: string; cols?: number; rows?: number };
-            if (message.type === 'input' && typeof message.data === 'string') terminals.write(session, message.data);
-            if (message.type === 'resize' && Number.isFinite(message.cols) && Number.isFinite(message.rows)) {
-              terminals.resize(session, message.cols!, message.rows!);
-            }
-            if (message.type === 'close') terminals.terminate(session);
-          } catch {
-            // 忽略格式错误的终端消息，不让连接中断。
-          }
-        },
-      onClose: () => { unsubscribe?.(); },
-      };
-    }));
-  }
-
-  return Object.assign(app, {
-    close: async () => {
-      terminals.closeAll();
-    },
-  });
+  return app;
 }

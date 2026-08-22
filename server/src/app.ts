@@ -57,7 +57,7 @@ export function createApp(
   const taskService = options.taskService ?? new TaskService({ db, runnerService });
   const app = new Hono<{ Variables: AppVariables }>();
   const nodeWebSocket = createNodeWebSocket({ app });
-  const workspaceTools = createWorkspaceToolsRoutes(db, nodeWebSocket.upgradeWebSocket);
+  const workspaceTools = createWorkspaceToolsRoutes(db);
   app.use(async (c, next) => {
     const requestId = c.req.header('x-request-id') ?? crypto.randomUUID();
     c.set('requestId', requestId);
@@ -101,7 +101,6 @@ export function createApp(
   taskService.start();
   return Object.assign(app, {
     close: async () => {
-      await workspaceTools.close();
       await taskService.close();
       await runnerService.close();
     },

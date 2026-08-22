@@ -15,7 +15,6 @@ import { AgentBuilderPage } from './pages/AgentBuilderPage.js';
 import { SetupPage } from './pages/SetupPage.js';
 import { ChatPage } from './pages/ChatPage.js';
 import { FilesPage } from './pages/FilesPage.js';
-import { TerminalPage } from './pages/TerminalPage.js';
 import { AgentProfilesPage } from './pages/AgentProfilesPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { MonitorPage } from './pages/MonitorPage.js';
@@ -55,7 +54,7 @@ const routes = createRoutesFromElements(
       <Route path="/groups" element={<Navigate to="/chat" replace />} />
       <Route path="/agent-profiles" element={<AgentProfilesPage />} />
       <Route path="/files" element={<FilesPage />} />
-      <Route path="/terminal" element={<TerminalPage />} />
+      <Route path="/terminal" element={<Navigate to="/chat" replace />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/setup/providers" element={<IntegrationSetupPage mode="providers" />} />
       <Route path="/setup/channels" element={<IntegrationSetupPage mode="channels" />} />

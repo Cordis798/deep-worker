@@ -18,7 +18,7 @@ async function setupWorkspace(app: App) {
   return { cookie, jid: body.workspace.jid };
 }
 
-describe('Workspace files and terminal routes', () => {
+describe('Workspace file routes', () => {
   it('browses, creates, uploads, and reads workspace files', async () => {
     const app = createApp({ db: initDatabase(':memory:'), runner: new FakePiRunner() });
     const { cookie, jid } = await setupWorkspace(app);
@@ -50,25 +50,6 @@ describe('Workspace files and terminal routes', () => {
     });
     expect(content.status).toBe(200);
     expect(((await content.json()) as { content: string }).content).toBe('hello from web');
-    await app.close();
-  });
-
-  it('creates and lists a workspace terminal session', async () => {
-    const app = createApp({ db: initDatabase(':memory:'), runner: new FakePiRunner() });
-    const { cookie, jid } = await setupWorkspace(app);
-    const created = await app.request(
-      `/api/workspaces/${jid}/terminal-sessions`,
-      jsonRequest(`/api/workspaces/${jid}/terminal-sessions`, {}, cookie),
-    );
-    expect(created.status).toBe(201);
-    const list = await app.request(`/api/workspaces/${jid}/terminal-sessions`, {
-      headers: { cookie: `dw_session=${cookie}` },
-    });
-    expect(list.status).toBe(200);
-    const listBody = (await list.json()) as { sessions: Array<{ mode: 'pty' | 'pipe'; degraded: boolean }> };
-    expect(listBody.sessions).toHaveLength(1);
-    expect(['pty', 'pipe']).toContain(listBody.sessions[0]?.mode);
-    expect(listBody.sessions[0]?.degraded).toBe(listBody.sessions[0]?.mode === 'pipe');
     await app.close();
   });
 

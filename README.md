@@ -51,7 +51,7 @@ Container Runner 会为每个会话生成独立的 Pi `models.json`，其中只�
 
 | 领域       | 能力                                                                         |
 | ---------- | ---------------------------------------------------------------------------- |
-| 工作台     | 多用户、Workspace、Runtime Session、Agent Profile、文件、终端与记忆          |
+| 工作台     | 多用户、Workspace、Runtime Session、Agent Profile、文件与记忆                |
 | Agent 执行 | Pi RPC 进程、流式事件、bash 最小工具集、会话串行与跨会话并发                 |
 | 可靠性     | Inbox → Turn → Outbox 状态机、幂等键、指数退避重试、超时和重启恢复           |
 | 模型接入   | Provider 加密凭据、会话粘性、Round Robin / Weighted / Failover 与健康恢复    |
