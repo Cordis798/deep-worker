@@ -15,6 +15,10 @@ function fixture() {
   return { db, workspace };
 }
 
+function currentDayTimestamp(): string {
+  return `${new Date().toISOString().slice(0, 10)}T10:00:00.000Z`;
+}
+
 describe('计费与配额', () => {
   it('默认关闭本地计费时，零余额用户仍可访问模型', () => {
     const db = initDatabase(':memory:');
@@ -35,7 +39,7 @@ describe('计费与配额', () => {
     expect(redeemCode(db, 'member', 'start-one').success).toBe(true);
     expect(redeemCode(db, 'member', 'START-ONE').success).toBe(false);
     expect(getBalance(db, 'member').balanceUSD).toBe(15);
-    recordUsageEvent({ db, userId: 'member', workspaceJid: workspace.jid, eventId: 'quota-event', usage: { inputTokens: 6, outputTokens: 0 }, createdAt: '2026-08-21T10:00:00.000Z' });
+    recordUsageEvent({ db, userId: 'member', workspaceJid: workspace.jid, eventId: 'quota-event', usage: { inputTokens: 6, outputTokens: 0 }, createdAt: currentDayTimestamp() });
     expect(checkQuota(db, 'member', 'member').allowed).toBe(false);
     expect(checkBillingAccess(db, 'member', 'member').blockType).toBe('quota_exceeded');
   });
@@ -53,7 +57,7 @@ describe('计费与配额', () => {
     createBillingPlan(db, { id: 'unlimited', name: '不限量套餐', allowOverage: true });
     assignPlan(db, 'member', 'unlimited', 'admin');
     setQuotaOverride(db, { scopeType: 'agent', scopeId: 'agent-a', dailyTokenQuota: 5, dailyCostQuota: null, weeklyTokenQuota: null, weeklyCostQuota: null, monthlyTokenQuota: null, monthlyCostQuota: null });
-    recordUsageEvent({ db, userId: 'member', workspaceJid: workspace.jid, agentId: 'agent-a', eventId: 'agent-quota-event', usage: { inputTokens: 6, outputTokens: 0 }, createdAt: '2026-08-21T10:00:00.000Z' });
+    recordUsageEvent({ db, userId: 'member', workspaceJid: workspace.jid, agentId: 'agent-a', eventId: 'agent-quota-event', usage: { inputTokens: 6, outputTokens: 0 }, createdAt: currentDayTimestamp() });
     expect(checkQuota(db, 'member', 'member', { agentId: 'agent-a', workspaceJid: workspace.jid })).toMatchObject({ allowed: false, blockType: 'quota_exceeded' });
     expect(checkQuota(db, 'member', 'member', { agentId: 'agent-b', workspaceJid: workspace.jid })).toMatchObject({ allowed: true });
 
