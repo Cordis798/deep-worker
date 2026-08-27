@@ -8,6 +8,7 @@ import { listPlugins, setPluginEnabled, upsertPlugin } from '../capabilities/plu
 import { resolveCapabilitiesFromDatabase, trimCapabilityManifest } from '../capabilities/capability-resolver.js';
 import { appendAgentBuilderTurn, createAgentBuilderDraft, getAgentBuilderDraft, prepareAgentBuilderDraft, publishAgentBuilderDraft, saveAgentBuilderDefinition, toPublicAgentBuilderDraft } from '../capabilities/agent-builder-service.js';
 import type { AppVariables } from '../types.js';
+import { canWorkspaceAction } from '../workspace-acl.js';
 
 const skillImportSchema = z.object({
   source_type: z.enum(['git', 'https', 'zip']),
@@ -137,6 +138,31 @@ export function createCapabilityRoutes(db: Db) {
     } catch (error) {
       return c.json({ error: errorMessage(error) }, 400);
     }
+  });
+
+  app.get('/workspaces/:jid/audit', (c) => {
+    const user = c.get('user')!;
+    const jid = c.req.param('jid');
+    if (!canWorkspaceAction(db, user.id, jid, 'manage')) return c.json({ error: 'Workspace not found' }, 404);
+    const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? 50) || 50));
+    const rows = db.prepare(
+      `SELECT id, actor_user_id, workspace_jid, job_role, capability_package,
+              decision, manifest_hash, conflicts_json, reason, created_at
+       FROM capability_resolution_audit WHERE workspace_jid = ?
+       ORDER BY created_at DESC LIMIT ?`,
+    ).all(jid, limit) as Array<Record<string, unknown>>;
+    return c.json({ audits: rows.map((row) => ({
+      id: row.id,
+      actor_user_id: row.actor_user_id,
+      workspace_jid: row.workspace_jid,
+      job_role: row.job_role,
+      capability_package: row.capability_package,
+      decision: row.decision,
+      manifest_hash: row.manifest_hash,
+      conflicts: JSON.parse(String(row.conflicts_json ?? '[]')),
+      reason: row.reason,
+      created_at: row.created_at,
+    })) });
   });
 
   app.post('/agent-builder/drafts', async (c) => {

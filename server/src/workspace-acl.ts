@@ -127,7 +127,7 @@ export function addWorkspaceMember(
   actorUserId: string,
   workspaceJid: string,
   userId: string,
-  role: Exclude<WorkspaceRole, 'workspace_admin'>,
+  role: WorkspaceRole,
   options: { jobRole?: WorkspaceMemberRow['job_role']; capabilityPackage?: string } = {},
 ): { ok: boolean; reason?: 'forbidden' | 'workspace_not_found' | 'user_not_found' } {
   if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'manage')) {

@@ -31,6 +31,7 @@ describe('workspace ACL routes', () => {
     const ownerCookie = cookieValue(setup);
     const member = await register(app, 'member');
     const viewer = await register(app, 'viewer');
+    const coAdmin = await register(app, 'coadmin');
 
     const profileResponse = await app.request(
       '/api/agent-profiles',
@@ -48,7 +49,7 @@ describe('workspace ACL routes', () => {
     const workspace = (await workspaceResponse.json()) as { workspace: { jid: string } };
     const jid = workspace.workspace.jid;
 
-    for (const [userId, role] of [[member.userId, 'member'], [viewer.userId, 'viewer']] as const) {
+    for (const [userId, role] of [[member.userId, 'member'], [viewer.userId, 'viewer'], [coAdmin.userId, 'workspace_admin']] as const) {
       const response = await app.request(
         `/api/workspaces/${jid}/members`,
         jsonRequest(`/api/workspaces/${jid}/members`, { user_id: userId, role }, ownerCookie),
@@ -113,6 +114,10 @@ describe('workspace ACL routes', () => {
       { method: 'POST', headers: { cookie: `dw_session=${viewer.cookie}` } },
     );
     expect(viewerCopy.status).toBe(404);
+
+    const coAdminAccess = await app.request(`/api/workspaces/${jid}/access`, { headers: { cookie: `dw_session=${coAdmin.cookie}` } });
+    expect(coAdminAccess.status).toBe(200);
+    expect((await coAdminAccess.json() as { role: string }).role).toBe('workspace_admin');
 
     const memberProfileUpdate = await app.request(
       `/api/agent-profiles/${profile.agent_profile.id}`,

@@ -34,6 +34,7 @@ export function ChatPage() {
   const [routerOpen, setRouterOpen] = useState(false);
   const [routerDraft, setRouterDraft] = useState('');
   const routerPlans = useAgentRouterStore((state) => currentWorkspaceId ? state.plans[currentWorkspaceId] ?? [] : []);
+  const routerAgents = useAgentRouterStore((state) => currentWorkspaceId ? state.agents[currentWorkspaceId] ?? [] : []);
   const routerError = useAgentRouterStore((state) => state.error);
   const loadRouter = useAgentRouterStore((state) => state.load);
   const createRouterPlan = useAgentRouterStore((state) => state.createPlan);
@@ -185,6 +186,10 @@ export function ChatPage() {
               <button disabled={!routerDraft.trim()} className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">规划</button>
             </form>
             {routerError && <p className="mx-auto mt-2 max-w-4xl text-xs text-rose-600">{routerError}</p>}
+            <div className="mx-auto mt-3 flex max-w-4xl flex-wrap gap-2 text-[11px] text-indigo-900">
+              <span className="font-semibold">可用 Agent：</span>
+              {routerAgents.length ? routerAgents.map((agent) => <span key={agent.bindingId} className="rounded-full bg-white px-2 py-1">{agent.name} · {agent.capabilities.join('、') || '通用'}</span>) : <span>当前使用工作区默认 Agent</span>}
+            </div>
             {routerPlans.slice(0, 3).map((plan) => <div key={plan.id} className="mx-auto mt-3 flex max-w-4xl items-center justify-between rounded-xl bg-white px-3 py-2 text-xs"><span><strong>{plan.intent}</strong> · {plan.route.explanation} · {plan.status}</span>{plan.status === 'planned' && <button onClick={() => void dispatchRouterPlan(currentWorkspaceId, plan.id)} className="font-semibold text-indigo-600">开始调度</button>}</div>)}
           </div>
         )}

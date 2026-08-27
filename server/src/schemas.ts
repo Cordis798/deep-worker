@@ -58,7 +58,7 @@ export const updateRuntimeSessionSchema = z
 
 export const workspaceMemberSchema = z.object({
   user_id: nonEmptyString('用户 ID', 200),
-  role: z.enum(['member', 'viewer']),
+  role: z.enum(['workspace_admin', 'member', 'viewer']),
   job_role: z.enum(['general', 'engineering', 'operations', 'sales']).optional(),
   capability_package: nonEmptyString('能力包', 80).optional(),
 });
