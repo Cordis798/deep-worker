@@ -99,4 +99,21 @@ describe('生效能力解析', () => {
     expect(runtimeManifest.mcp.selected[0]).toMatchObject({ url: 'https://example.test', credentials: { token: 'secret' } });
     db.close();
   });
+
+  it('工作区出现未知能力包时拒绝并写入 denied 审计', () => {
+    const db = initDatabase(':memory:');
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO users (id, username, password_hash, role, status, permissions, created_at, updated_at)
+       VALUES ('owner', 'owner', 'x', 'admin', 'active', '[]', ?, ?)`,
+    ).run(now, now);
+    const workspace = createWorkspace(db, 'owner', { name: '脏数据工作区' })!;
+    db.prepare(
+      `UPDATE workspace_members SET job_role = 'engineering', capability_package = 'unknown'
+       WHERE workspace_jid = ? AND user_id = 'owner'`,
+    ).run(workspace.jid);
+    expect(() => resolveCapabilitiesForWorkspace(db, 'owner', workspace.jid)).toThrowError(expect.objectContaining({ code: 'CAPABILITY_GOVERNANCE_INVALID' }));
+    expect(db.prepare('SELECT decision, job_role, capability_package FROM capability_resolution_audit WHERE workspace_jid = ?').get(workspace.jid)).toEqual({ decision: 'denied', job_role: 'engineering', capability_package: 'unknown' });
+    db.close();
+  });
 });

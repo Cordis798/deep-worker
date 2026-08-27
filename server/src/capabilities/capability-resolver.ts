@@ -179,6 +179,22 @@ function toMcpCandidate(row: McpServerRow | McpRuntimeServerRow): McpCandidate {
   };
 }
 
+const VALID_JOB_ROLES = new Set(['general', 'engineering', 'operations', 'sales']);
+
+function resolveWorkspaceGovernance(member: { job_role?: string; capability_package?: string } | undefined): CapabilityGovernance {
+  if (member?.job_role && !VALID_JOB_ROLES.has(member.job_role)) {
+    throw new CapabilityResolverError('CAPABILITY_GOVERNANCE_INVALID', `未知岗位：${member.job_role}`);
+  }
+  const governance = resolveCapabilityGovernance({
+    jobRole: member?.job_role,
+    packageId: member?.capability_package,
+  });
+  if (member?.capability_package && governance.packageId !== member.capability_package) {
+    throw new CapabilityResolverError('CAPABILITY_GOVERNANCE_INVALID', `能力包与岗位不匹配：${member.capability_package}`);
+  }
+  return governance;
+}
+
 function toPluginCandidate(row: PluginRow): PluginCandidate {
   return { id: row.id, name: row.name, version: row.version, enabled: row.enabled };
 }
@@ -204,10 +220,27 @@ export function resolveCapabilitiesForWorkspace(
        WHERE workspace_jid = ? AND user_id = ? AND status = 'active'`,
     )
     .get(workspaceJid, actorUserId) as { job_role?: string; capability_package?: string } | undefined;
-  const governance = resolveCapabilityGovernance({
-    jobRole: member?.job_role,
-    packageId: member?.capability_package,
-  });
+  let governance: CapabilityGovernance;
+  try {
+    governance = resolveWorkspaceGovernance(member);
+  } catch (error) {
+    const fallback = resolveCapabilityGovernance({ jobRole: 'general', packageId: 'general' });
+    db.prepare(
+      `INSERT INTO capability_resolution_audit (
+        id, actor_user_id, workspace_jid, job_role, capability_package,
+        decision, manifest_hash, conflicts_json, reason, created_at
+      ) VALUES (?, ?, ?, ?, ?, 'denied', NULL, '[]', ?, ?)`,
+    ).run(
+      `cara_${crypto.randomUUID()}`,
+      actorUserId,
+      workspaceJid,
+      member?.job_role ?? fallback.jobRole,
+      member?.capability_package ?? fallback.packageId,
+      error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
+      new Date().toISOString(),
+    );
+    throw error;
+  }
   try {
     const manifest = resolveCapabilitiesFromDatabase(db, access.credentialPrincipalId, {
       ...options,
