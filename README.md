@@ -109,7 +109,7 @@ Container Runner 会为每个会话生成独立的 Pi `models.json`，其中只�
 | Agent 配置 | 四段式 Prompt、版本恢复、能力预览、一次性确认短语与身份指纹失效              |
 | 渠道接入   | 七渠道统一适配器、能力矩阵、多账号隔离、Workspace / Session 挂载与入站去重   |
 | 自动化     | Cron / 间隔 / 单次定时任务、租约恢复、幂等运行与结果通知                     |
-| 能力治理   | Skills 导入与哈希、最小 MCP 客户端、Plugins 目录、能力解析与注入             |
+| 能力治理   | Skills 导入与哈希、受治理 MCP 客户端与 Pi custom tool bridge、Plugins 目录、能力解析与注入 |
 | 可观测性   | 队列、Runner、Container、Provider 脱敏监控；Token 用量、成本和 CSV 导出      |
 | 安全边界   | ACL 权限矩阵、登录锁定、配置脱敏、数据库迁移备份与 Host / Container 执行模式 |
 
