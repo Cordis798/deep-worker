@@ -126,4 +126,37 @@ describe('agent router routes', () => {
     const ownerDispatch = await app.request(`/api/workspaces/${jid}/router/plans/${memberPlan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${ownerCookie}` } });
     expect(ownerDispatch.status).toBe(403);
   });
+
+  it('取消运行中的编排会中止当前 Runner 回合', async () => {
+    db = initDatabase(':memory:');
+    const runner = new FakePiRunner({ delayMs: 250, response: '不应完成' });
+    app = createApp({ db, runner });
+    const setup = await app.request('/api/auth/setup', jsonRequest('/api/auth/setup', { username: 'owner', password: 'password123' }));
+    expect(setup.status).toBe(201);
+    const cookie = cookieValue(setup);
+    const profileResponse = await app.request('/api/agent-profiles', jsonRequest('/api/agent-profiles', { name: '研发 Agent' }, cookie));
+    const profile = (await profileResponse.json()) as { agent_profile: { id: string } };
+    const workspaceResponse = await app.request('/api/workspaces', jsonRequest('/api/workspaces', { name: '取消测试工作区', agent_profile_id: profile.agent_profile.id }, cookie));
+    const workspace = (await workspaceResponse.json()) as { workspace: { jid: string } };
+    const jid = workspace.workspace.jid;
+    const binding = await app.request(`/api/workspaces/${jid}/agents`, jsonRequest(`/api/workspaces/${jid}/agents`, { agent_profile_id: profile.agent_profile.id, capabilities: ['code'], role_tags: ['engineering'] }, cookie));
+    expect(binding.status).toBe(201);
+    const planned = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '请修复代码' }, cookie));
+    const plan = (await planned.json()) as { plan: { id: string } };
+    expect((await app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/approve`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } })).status).toBe(200);
+
+    const dispatchPromise = app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const status = (db.prepare('SELECT status FROM agent_router_plans WHERE id = ?').get(plan.plan.id) as { status?: string } | undefined)?.status;
+      if (status === 'running') break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    const cancelled = await app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/cancel`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
+    expect(cancelled.status).toBe(200);
+    const dispatched = await dispatchPromise;
+    expect(dispatched.status).toBe(200);
+    const result = (await dispatched.json()) as { result: { status: string } };
+    expect(result.result.status).toBe('cancelled');
+    expect(runner.calls).toHaveLength(1);
+  });
 });

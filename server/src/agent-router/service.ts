@@ -133,6 +133,7 @@ export class AgentRouterService {
       if (current?.status === 'cancelled') return current.result ?? this.resultFromTasks(input, current, []);
       throw new RouterDispatchBusyError();
     }
+    this.activeDispatches.set(plan.id, abortController);
     appendRouterEvent(this.db, plan.id, null, { type: 'plan_started', planId: plan.id });
     if (tasks.length > 1 && tasks.every((task) => task.spec.dependsOn.length === 0)) {
       try {
