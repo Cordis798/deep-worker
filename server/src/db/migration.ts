@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 12;
+export const CURRENT_SCHEMA_VERSION = 14;
 
 export class MigrationError extends Error {}
 
@@ -806,6 +806,50 @@ function createQuotaOverrideTables(db: Database.Database): void {
   `);
 }
 
+function migrateRuntimeContext(db: Database.Database): void {
+  db.exec(`
+    ALTER TABLE runtime_sessions ADD COLUMN context_status TEXT NOT NULL DEFAULT 'new'
+      CHECK (context_status IN ('new', 'restored', 'reset_required'));
+    ALTER TABLE runtime_sessions ADD COLUMN context_generation INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE runtime_sessions ADD COLUMN sdk_session_id TEXT;
+    ALTER TABLE runtime_sessions ADD COLUMN context_error TEXT;
+    ALTER TABLE runtime_sessions ADD COLUMN source_session_id TEXT;
+    ALTER TABLE runtime_sessions ADD COLUMN source_snapshot_hash TEXT;
+    CREATE INDEX IF NOT EXISTS idx_runtime_sessions_context
+      ON runtime_sessions(workspace_jid, context_status, updated_at DESC);
+  `);
+}
+
+function migrateWorkspaceMembers(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_members (
+      workspace_jid TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('workspace_admin', 'member', 'viewer')),
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
+      invited_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      revoked_at TEXT,
+      PRIMARY KEY (workspace_jid, user_id),
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (invited_by) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_members_user
+      ON workspace_members(user_id, status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace
+      ON workspace_members(workspace_jid, status, role);
+  `);
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT OR IGNORE INTO workspace_members (
+      workspace_jid, user_id, role, status, invited_by, created_at, updated_at
+    ) SELECT jid, owner_user_id, 'workspace_admin', 'active', owner_user_id, ?, ?
+      FROM workspaces WHERE owner_user_id IS NOT NULL`,
+  ).run(now, now);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
@@ -819,6 +863,8 @@ export const MIGRATIONS: Migration[] = [
   { version: 10, name: 'provider_tables', up: createProviderTables },
   { version: 11, name: 'usage_billing_tables', up: createUsageBillingTables },
   { version: 12, name: 'billing_quota_overrides', up: createQuotaOverrideTables },
+  { version: 13, name: 'runtime_context', up: migrateRuntimeContext },
+  { version: 14, name: 'workspace_members', up: migrateWorkspaceMembers },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {

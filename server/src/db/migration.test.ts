@@ -107,6 +107,7 @@ describe('sqlite migration framework', () => {
       'monthly_usage', 'daily_usage', 'redeem_codes', 'redeem_code_usage',
       'billing_audit_log', 'usage_events', 'usage_event_models', 'usage_daily_summary',
       'billing_quota_overrides',
+      'workspace_members',
     ]) {
       expect(
         db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),
@@ -114,6 +115,9 @@ describe('sqlite migration framework', () => {
     }
     expect(
       db.prepare("SELECT 1 FROM pragma_table_info('workspaces') WHERE name = 'execution_mode'").get(),
+    ).toBeTruthy();
+    expect(
+      db.prepare("SELECT 1 FROM pragma_table_info('runtime_sessions') WHERE name = 'context_status'").get(),
     ).toBeTruthy();
     db.close();
   });
@@ -143,6 +147,29 @@ describe('sqlite migration framework', () => {
         .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'runtime_flags'")
         .get(),
     ).toBeTruthy();
+    upgraded.close();
+  });
+
+  it('backfills each workspace owner as an active workspace administrator', () => {
+    const dbPath = path.join(dir, 'members.db');
+    const db = initDatabase(dbPath, { targetVersion: 12 });
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO users (id, username, password_hash, role, status, permissions, created_at, updated_at)
+       VALUES ('owner-1', 'owner-1', 'x', 'member', 'active', '[]', ?, ?)`,
+    ).run(now, now);
+    db.prepare(
+      `INSERT INTO workspaces (jid, folder, owner_user_id, name, status, execution_mode, is_home, created_at, updated_at)
+       VALUES ('workspace-1', 'workspace-1', 'owner-1', '工作区', 'active', 'container', 0, ?, ?)`,
+    ).run(now, now);
+    db.close();
+
+    const upgraded = initDatabase(dbPath);
+    expect(
+      upgraded
+        .prepare('SELECT role, status FROM workspace_members WHERE workspace_jid = ? AND user_id = ?')
+        .get('workspace-1', 'owner-1'),
+    ).toEqual({ role: 'workspace_admin', status: 'active' });
     upgraded.close();
   });
 
