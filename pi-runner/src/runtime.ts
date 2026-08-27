@@ -46,7 +46,13 @@ export interface RuntimeSessionOptions {
   systemPrompt?: string;
   provider?: PiProviderSelection;
   capabilities?: PiCapabilityInjection;
+  allowedTools?: string[];
+  onContextStatus?: (status: RuntimeContextStatus) => void;
 }
+
+export type RuntimeContextStatus =
+  | { status: 'new' | 'restored' }
+  | { status: 'reset_required'; reason: string };
 
 export interface RuntimeSession {
   readonly sessionId: string;
