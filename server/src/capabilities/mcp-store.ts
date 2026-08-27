@@ -12,6 +12,8 @@ export interface McpServerConfig {
   url?: string;
   headers?: Record<string, string>;
   credentials?: Record<string, unknown>;
+  /** 路由任务可调用的 MCP 工具名称白名单；缺省仅兼容非路由运行时。 */
+  allowedTools?: string[];
 }
 
 export interface McpServerRow {

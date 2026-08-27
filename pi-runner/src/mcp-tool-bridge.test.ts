@@ -94,8 +94,27 @@ describe('Pi MCP 工具桥接', () => {
       }
       return { ok: true, json: async () => ({ result: { content: [{ type: 'text', text: 'ok' }] } }) };
     }));
-    const bridge = await createMcpToolBridge([{ id: 'mcp-read', name: 'data-api', transport: 'http', url: 'https://example.test', toolPolicy: 'read' }]);
+    const bridge = await createMcpToolBridge([{ id: 'mcp-read', name: 'data-api', transport: 'http', url: 'https://example.test', allowedTools: ['lookup'], toolPolicy: 'read' }]);
     expect(bridge?.tools.map((tool) => tool.name)).toEqual(['mcp_data_api_lookup']);
+    await bridge!.close();
+  });
+
+  it('路由任务只暴露 MCP 工具白名单并在调用时再次校验', async () => {
+    const methods: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { method?: string };
+      methods.push(body.method ?? '');
+      if (body.method === 'initialize') return { ok: true, json: async () => ({ result: {} }) };
+      if (body.method === 'tools/list') return { ok: true, json: async () => ({ result: { tools: [{ name: 'lookup' }, { name: 'delete_record' }] } }) };
+      return { ok: true, json: async () => ({ result: { content: [{ type: 'text', text: 'ok' }] } }) };
+    }));
+    const server = { id: 'mcp-allowlist', name: 'data-api', transport: 'http' as const, url: 'https://example.test', allowedTools: ['lookup'], toolPolicy: 'write' as const };
+    const bridge = await createMcpToolBridge([server]);
+    expect(bridge?.tools.map((tool) => tool.name)).toEqual(['mcp_data_api_lookup']);
+    await expect((bridge!.tools[0] as any).execute('call-allowlist', {}, undefined, undefined, {})).resolves.toBeDefined();
+    expect(methods).toContain('tools/call');
+    server.allowedTools = [];
+    await expect((bridge!.tools[0] as any).execute('call-allowlist-revoked', {}, undefined, undefined, {})).rejects.toMatchObject({ code: 'MCP_TOOL_NOT_ALLOWED' });
     await bridge!.close();
   });
 });

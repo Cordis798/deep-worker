@@ -12,6 +12,7 @@ export interface PiMcpServer {
   url?: string;
   headers?: Record<string, string>;
   credentials?: Record<string, unknown>;
+  allowedTools?: string[];
   toolPolicy?: 'read' | 'write';
 }
 

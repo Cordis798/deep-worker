@@ -369,6 +369,8 @@ export async function createMcpToolBridge(servers: readonly PiMcpServer[]): Prom
       clients.push({ client, server });
       const tools = await client.listTools();
       for (const tool of tools) {
+        const allowlisted = server.allowedTools?.some((allowed) => allowed.toLowerCase() === tool.name.toLowerCase()) ?? false;
+        if (server.toolPolicy && !allowlisted) continue;
         if (server.toolPolicy === 'read' && (tool.annotations?.readOnlyHint !== true || tool.annotations.destructiveHint === true)) continue;
         const baseName = `mcp_${safeToolName(server.name)}_${safeToolName(tool.name)}`;
         let name = baseName;
@@ -387,10 +389,15 @@ export async function createMcpToolBridge(servers: readonly PiMcpServer[]): Prom
             signal: AbortSignal | undefined,
             _onUpdate: AgentToolUpdateCallback | undefined,
             _ctx: ExtensionContext,
-          ): Promise<AgentToolResult<unknown>> => ({
-            content: textContent(await client.callTool(tool.name, params, signal)),
-            details: { serverId: server.id, serverName: server.name, toolName: tool.name },
-          }),
+          ): Promise<AgentToolResult<unknown>> => {
+            if (server.toolPolicy && !server.allowedTools?.some((allowed) => allowed.toLowerCase() === tool.name.toLowerCase())) {
+              throw new McpToolBridgeError('MCP_TOOL_NOT_ALLOWED', `MCP 工具未在白名单中：${server.name}/${tool.name}`);
+            }
+            return {
+              content: textContent(await client.callTool(tool.name, params, signal)),
+              details: { serverId: server.id, serverName: server.name, toolName: tool.name },
+            };
+          },
         });
       }
     }

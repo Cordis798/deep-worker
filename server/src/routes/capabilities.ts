@@ -29,6 +29,7 @@ const mcpSchema = z.object({
   url: z.string().url().max(2000).optional(),
   headers: z.record(z.string(), z.string().max(2000)).optional(),
   credentials: z.record(z.string(), z.unknown()).optional(),
+  allowed_tools: z.array(z.string().trim().min(1).max(120)).max(200).optional(),
 });
 
 const definitionSchema = z.object({
@@ -97,7 +98,10 @@ export function createCapabilityRoutes(db: Db) {
     const parsed = mcpSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: parsed.error.issues.map((issue) => issue.message).join('；') }, 400);
     try {
-      const result = createMcpServer(db, c.get('user')!.id, parsed.data as Parameters<typeof createMcpServer>[2] & { name: string; transport: McpTransportKind });
+      const result = createMcpServer(db, c.get('user')!.id, {
+        ...parsed.data,
+        ...(parsed.data.allowed_tools ? { allowedTools: [...new Set(parsed.data.allowed_tools)] } : {}),
+      } as Parameters<typeof createMcpServer>[2] & { name: string; transport: McpTransportKind });
       return c.json({ mcp_server: result.row }, 201);
     } catch (error) {
       return c.json({ error: errorMessage(error) }, 400);

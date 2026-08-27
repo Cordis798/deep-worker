@@ -34,6 +34,7 @@ export interface McpCandidate {
   url?: string;
   headers?: Record<string, string>;
   credentials?: Record<string, unknown>;
+  allowedTools?: string[];
 }
 
 export interface PluginCandidate {
@@ -177,6 +178,7 @@ function toMcpCandidate(row: McpServerRow | McpRuntimeServerRow): McpCandidate {
     ...(runtime.url ? { url: runtime.url } : {}),
     ...(runtime.headers ? { headers: runtime.headers } : {}),
     ...(runtime.credentials ? { credentials: runtime.credentials } : {}),
+    ...(runtime.allowedTools ? { allowedTools: runtime.allowedTools } : {}),
   };
 }
 
