@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
-import { getAgentProfileById, getOwnedAgentProfile } from './agent-profiles.js';
+import { createAgentProfile, getAgentProfileById, getOwnedAgentProfile } from './agent-profiles.js';
 import { canWorkspaceAction, getWorkspaceAccess } from './workspace-acl.js';
 import { getOwnedWorkspace, getWorkspaceById } from './workspaces.js';
 
@@ -14,6 +14,10 @@ export interface RuntimeSessionRow {
   status: 'active' | 'archived';
   created_at: string;
   updated_at: string;
+  context_status?: 'new' | 'restored' | 'reset_required';
+  context_generation?: number;
+  source_session_id?: string | null;
+  source_snapshot_hash?: string | null;
 }
 
 export function generateRuntimeSessionId(): string {
@@ -152,6 +156,53 @@ export function archiveAccessibleRuntimeSession(
   return updateAccessibleRuntimeSession(db, actorUserId, workspaceJid, id, { status: 'archived' });
 }
 
+export function copyRuntimeSessionToPersonalWorkspace(
+  db: Db,
+  actorUserId: string,
+  workspaceJid: string,
+  id: string,
+): { ok: boolean; workspaceJid?: string; sessionId?: string; reason?: 'not_found' | 'forbidden' } {
+  if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'copy')) return { ok: false, reason: 'not_found' };
+  const source = getAccessibleRuntimeSession(db, actorUserId, workspaceJid, id);
+  if (!source) return { ok: false, reason: 'not_found' };
+  const sourceProfile = source.agent_profile_id ? getAgentProfileById(db, source.agent_profile_id) : undefined;
+  const now = new Date().toISOString();
+  const copy = db.transaction(() => {
+    const profile = sourceProfile
+      ? createAgentProfile(db, actorUserId, {
+        name: `${sourceProfile.name}（副本）`,
+        identity_prompt: sourceProfile.identity_prompt,
+        soul_prompt: sourceProfile.soul_prompt,
+        agents_prompt: sourceProfile.agents_prompt,
+        tools_prompt: sourceProfile.tools_prompt,
+        prompt_mode: sourceProfile.prompt_mode as 'append' | 'replace',
+      })
+      : undefined;
+    const workspaceId = `web:${crypto.randomUUID()}`;
+    const workspaceFolder = workspaceId.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    db.prepare(
+      `INSERT INTO workspaces (
+        jid, folder, owner_user_id, name, agent_profile_id, status, execution_mode,
+        is_home, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'active', 'container', 0, ?, ?)`,
+    ).run(workspaceId, workspaceFolder, actorUserId, `${source.name}（副本）`, profile?.id ?? null, now, now);
+    db.prepare(
+      `INSERT INTO workspace_members (
+        workspace_jid, user_id, role, status, invited_by, created_at, updated_at
+      ) VALUES (?, ?, 'workspace_admin', 'active', ?, ?, ?)`,
+    ).run(workspaceId, actorUserId, actorUserId, now, now);
+    const sessionId = generateRuntimeSessionId();
+    db.prepare(
+      `INSERT INTO runtime_sessions (
+        id, workspace_jid, name, agent_profile_id, status, created_at, updated_at,
+        context_status, context_generation, source_session_id, source_snapshot_hash
+      ) VALUES (?, ?, ?, ?, 'active', ?, ?, 'new', 1, ?, ?)`,
+    ).run(sessionId, workspaceId, `${source.name}（副本）`, profile?.id ?? null, now, now, source.id, source.source_snapshot_hash ?? null);
+    return { workspaceId, sessionId };
+  })();
+  return { ok: true, workspaceJid: copy.workspaceId, sessionId: copy.sessionId };
+}
+
 export function createRuntimeSession(
   db: Db,
   ownerUserId: string,
@@ -241,5 +292,9 @@ export function toRuntimeSessionPublic(row: RuntimeSessionRow) {
     status: row.status,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    ...(row.context_status ? { context_status: row.context_status } : {}),
+    ...(row.context_generation ? { context_generation: row.context_generation } : {}),
+    ...(row.source_session_id ? { source_session_id: row.source_session_id } : {}),
+    ...(row.source_snapshot_hash ? { source_snapshot_hash: row.source_snapshot_hash } : {}),
   };
 }

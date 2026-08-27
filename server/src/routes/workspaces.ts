@@ -11,6 +11,7 @@ import {
 import { authMiddleware } from '../middleware/auth.js';
 import {
   archiveAccessibleRuntimeSession,
+  copyRuntimeSessionToPersonalWorkspace,
   createAccessibleRuntimeSession,
   getAccessibleRuntimeSession,
   listAccessibleRuntimeSessions,
@@ -206,6 +207,20 @@ export function createWorkspaceRoutes(db: Db) {
     }
     const session = getAccessibleRuntimeSession(db, user.id, c.req.param('jid'), result.id!);
     return c.json({ session: toRuntimeSessionPublic(session!) }, 201);
+  });
+
+  app.post('/:jid/runtime-sessions/:sessionId/copy', (c) => {
+    const result = copyRuntimeSessionToPersonalWorkspace(
+      db,
+      c.get('user')!.id,
+      c.req.param('jid'),
+      c.req.param('sessionId'),
+    );
+    if (!result.ok) return c.json({ error: 'Runtime session not found' }, 404);
+    return c.json({
+      workspace_jid: result.workspaceJid,
+      session_id: result.sessionId,
+    }, 201);
   });
 
   app.patch('/:jid/runtime-sessions/:sessionId', async (c) => {

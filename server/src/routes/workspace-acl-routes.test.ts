@@ -90,6 +90,19 @@ describe('workspace ACL routes', () => {
       expect.arrayContaining([expect.objectContaining({ id: sessionId })]),
     );
 
+    const copied = await app.request(
+      `/api/workspaces/${jid}/runtime-sessions/${sessionId}/copy`,
+      { method: 'POST', headers: { cookie: `dw_session=${member.cookie}` } },
+    );
+    expect(copied.status).toBe(201);
+    const copiedBody = (await copied.json()) as { workspace_jid: string; session_id: string };
+    expect(copiedBody.workspace_jid).toMatch(/^web:/);
+    const viewerCopy = await app.request(
+      `/api/workspaces/${jid}/runtime-sessions/${sessionId}/copy`,
+      { method: 'POST', headers: { cookie: `dw_session=${viewer.cookie}` } },
+    );
+    expect(viewerCopy.status).toBe(404);
+
     const memberProfileUpdate = await app.request(
       `/api/agent-profiles/${profile.agent_profile.id}`,
       jsonRequest(`/api/agent-profiles/${profile.agent_profile.id}`, { name: 'Member edit' }, member.cookie, 'PATCH'),
