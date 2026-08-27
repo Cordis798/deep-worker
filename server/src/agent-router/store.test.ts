@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { initDatabase } from '../db/migration.js';
-import { claimRouterTask, failRouterPlanForWorker, failRouterTasksForWorker, renewRouterTask, setRouterTaskStatus } from './store.js';
+import { claimRouterTask, failRouterPlanForWorker, failRouterTasksForWorker, renewRouterTask, setRouterTaskStatus, verifyRouterPlanHash } from './store.js';
 
 describe('agent router task lease fencing', () => {
   let db: ReturnType<typeof initDatabase> | undefined;
@@ -80,5 +80,38 @@ describe('agent router task lease fencing', () => {
     expect(failRouterPlanForWorker(db, planId, userId)).toBe(true);
     expect((db.prepare('SELECT status, lease_owner, lease_expires_at FROM agent_router_tasks WHERE id = ?').get(taskId) as { status: string; lease_owner: string | null; lease_expires_at: string | null })).toEqual({ status: 'failed', lease_owner: null, lease_expires_at: null });
     expect((db.prepare('SELECT status, dispatch_owner, dispatch_lease_expires_at FROM agent_router_plans WHERE id = ?').get(planId) as { status: string; dispatch_owner: string | null; dispatch_lease_expires_at: string | null })).toEqual({ status: 'failed', dispatch_owner: null, dispatch_lease_expires_at: null });
+  });
+
+  it('校验审批计划完整性 hash', () => {
+    const plan = {
+      id: 'arp-hash',
+      workspaceJid: 'ws-hash',
+      sessionId: null,
+      actorUserId: 'user-hash',
+      intent: 'engineering',
+      status: 'planned' as const,
+      input: '请修复代码',
+      route: {
+        intent: 'engineering',
+        requiredCapabilities: ['code'],
+        tasks: [],
+        fallback: 'reject' as const,
+        explanation: '',
+        risk: 'write' as const,
+      },
+      result: null,
+      capabilityHash: 'capability-hash',
+      createdAt: '',
+      updatedAt: '',
+      completedAt: null,
+      planHash: null,
+      approvalRequired: true,
+      approvalStatus: 'pending' as const,
+      approvalExpiresAt: null,
+      approvedBy: null,
+      approvedAt: null,
+    };
+    expect(verifyRouterPlanHash(plan)).toBe(false);
+    expect(verifyRouterPlanHash({ ...plan, approvalRequired: false })).toBe(true);
   });
 });

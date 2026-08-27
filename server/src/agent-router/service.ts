@@ -26,6 +26,7 @@ import {
   renewRouterTask,
   rejectRouterPlan,
   skipRouterTask,
+  verifyRouterPlanHash,
   type AgentBindingRow,
   type AgentRouterPlanRow,
   type AgentRouterTaskRow,
@@ -48,13 +49,15 @@ export class RouterApprovalRequiredError extends Error {
 }
 
 export class RouterPlanStaleError extends Error {
-  constructor(public readonly reason: 'capability_changed' | 'agent_binding_changed' | 'capability_unavailable') {
+  constructor(public readonly reason: 'capability_changed' | 'agent_binding_changed' | 'capability_unavailable' | 'plan_tampered') {
     super(
       reason === 'capability_changed'
         ? 'Router plan capabilities changed; re-plan is required'
         : reason === 'agent_binding_changed'
           ? 'Router plan Agent binding changed; re-plan is required'
-          : 'Router plan capabilities are unavailable; re-plan is required',
+          : reason === 'capability_unavailable'
+            ? 'Router plan capabilities are unavailable; re-plan is required'
+            : 'Router plan integrity check failed; re-plan is required',
     );
     this.name = 'RouterPlanStaleError';
   }
@@ -125,6 +128,7 @@ export class AgentRouterService {
     if (plan.approvalRequired && plan.approvalStatus !== 'approved') {
       throw new RouterApprovalRequiredError(plan.approvalStatus === 'pending' ? 'pending' : plan.approvalStatus === 'expired' ? 'expired' : 'rejected');
     }
+    if (!verifyRouterPlanHash(plan)) throw new RouterPlanStaleError('plan_tampered');
     if (plan.status === 'completed') return plan.result ?? this.resultFromTasks(input, plan, []);
     this.assertPlanFresh(input, plan, tasks);
     const workerId = `router-worker:${crypto.randomUUID()}`;

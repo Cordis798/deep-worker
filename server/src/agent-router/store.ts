@@ -120,6 +120,18 @@ function routerPlanHash(input: { workspaceJid: string; actorUserId: string; mess
   })).digest('hex');
 }
 
+export function verifyRouterPlanHash(plan: AgentRouterPlanRow): boolean {
+  if (!plan.approvalRequired) return true;
+  if (!plan.planHash) return false;
+  return routerPlanHash({
+    workspaceJid: plan.workspaceJid,
+    actorUserId: plan.actorUserId,
+    message: plan.input,
+    route: plan.route,
+    capabilityHash: plan.capabilityHash,
+  }) === plan.planHash;
+}
+
 export function listAgentBindings(db: Db, actorUserId: string, workspaceJid: string): AgentBindingRow[] | undefined {
   if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'view')) return undefined;
   const rows = db.prepare(
