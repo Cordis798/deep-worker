@@ -17,6 +17,16 @@ function requestsParallelWork(text: string): boolean {
   return includesAny(text, ['同时', '并行', '分别', '各自', 'in parallel', 'parallel']);
 }
 
+function effectiveRuleRisk(rule: (typeof INTENT_RULES)[number], message: string): AgentRouterTaskRisk {
+  if (rule.intent === 'engineering' && includesAny(message, ['分析', '审查', '查看', 'review']) && !includesAny(message, ['修复', '开发', '编写', '改动'])) {
+    return 'read';
+  }
+  if (rule.intent === 'operations' && includesAny(message, ['监控', '日志', '告警']) && !includesAny(message, ['部署', '发布', '上线'])) {
+    return 'read';
+  }
+  return rule.risk;
+}
+
 function candidateSupports(candidate: AgentRouterCandidate, required: string[]): boolean {
   if (required.length === 0) return true;
   const capabilities = new Set(candidate.capabilities.map((item) => item.toLowerCase()));
@@ -43,12 +53,18 @@ export function buildAgentRouterPlan(
 ): AgentRouterPlanSpec {
   const inferred = inferRouteIntent(message);
   const tasks: AgentRouterTaskSpec[] = [];
-  const matchedRules = INTENT_RULES.filter((rule) => includesAny(message, rule.tokens));
+  const matchedRules = INTENT_RULES
+    .filter((rule) => includesAny(message, rule.tokens))
+    .map((rule) => ({ ...rule, risk: effectiveRuleRisk(rule, message) }));
+  const inferredRisk = matchedRules.reduce<AgentRouterTaskRisk>(
+    (current, rule) => RISK_ORDER.indexOf(rule.risk) > RISK_ORDER.indexOf(current) ? rule.risk : current,
+    'read',
+  );
   const distinctMatches = new Set(matchedRules.map((rule) => choose(candidates, rule.capabilities, rule.intent)?.bindingId).filter(Boolean));
   const taskRules = matchedRules.length > 1 && distinctMatches.size > 1
     ? matchedRules
-    : [{ intent: inferred.intent, capabilities: inferred.requiredCapabilities, tokens: [], risk: 'read' as const }];
-  const parallel = requestsParallelWork(message) && taskRules.length > 1;
+    : [{ intent: inferred.intent, capabilities: inferred.requiredCapabilities, tokens: [], risk: inferredRisk }];
+  const parallel = requestsParallelWork(message) && taskRules.length > 1 && taskRules.every((rule) => rule.risk === 'read');
   for (const [ordinal, rule] of taskRules.entries()) {
     const candidate = choose(candidates, rule.capabilities, rule.intent);
     if (!candidate) continue;

@@ -29,7 +29,7 @@ describe('agent router planner', () => {
   });
 
   it('显式要求同时处理时生成无依赖子任务', () => {
-    const plan = buildAgentRouterPlan('请同时分析代码问题和发布监控', candidates);
+    const plan = buildAgentRouterPlan('请同时分析代码问题和监控日志', candidates);
     expect(plan.tasks).toHaveLength(2);
     expect(plan.tasks.every((task) => task.dependsOn.length === 0)).toBe(true);
     expect(plan.explanation).toContain('并行调度');
@@ -39,5 +39,19 @@ describe('agent router planner', () => {
     const plan = buildAgentRouterPlan('请发布上线', [candidates[0]]);
     expect(plan.tasks).toHaveLength(0);
     expect(plan.fallback).toBe('reject');
+  });
+
+  it('保留单任务风险，外部操作必须进入审批', () => {
+    const plan = buildAgentRouterPlan('请发布上线', candidates);
+    expect(plan.tasks).toHaveLength(1);
+    expect(plan.tasks[0].risk).toBe('external');
+    expect(plan.risk).toBe('external');
+  });
+
+  it('混合风险的同时请求保持依赖顺序', () => {
+    const plan = buildAgentRouterPlan('请同时修复代码并发布上线', candidates);
+    expect(plan.tasks).toHaveLength(2);
+    expect(plan.tasks[0].dependsOn).toEqual([]);
+    expect(plan.tasks[1].dependsOn).toEqual([0]);
   });
 });
