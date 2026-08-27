@@ -173,8 +173,15 @@ export class AgentRouterService {
         }
         appendRouterEvent(this.db, plan.id, task.id, { type: 'task_started', ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId });
         let leaseLost = false;
+        const taskAbortController = new AbortController();
+        const forwardPlanAbort = () => taskAbortController.abort();
+        if (abortController.signal.aborted) taskAbortController.abort();
+        else abortController.signal.addEventListener('abort', forwardPlanAbort, { once: true });
         const heartbeat = setInterval(() => {
-        if (!renewRouterPlan(this.db, plan.id, workerId) || !renewRouterTask(this.db, task.id, workerId)) leaseLost = true;
+        if (!renewRouterPlan(this.db, plan.id, workerId) || !renewRouterTask(this.db, task.id, workerId)) {
+          leaseLost = true;
+          taskAbortController.abort();
+        }
         }, 30_000);
         try {
         const session = createAccessibleRuntimeSession(this.db, input.actorUserId, input.workspaceJid, {
@@ -191,7 +198,7 @@ export class AgentRouterService {
           idempotencyKey: `router:${plan.id}:${task.id}`,
           capabilityScope: task.spec.requiredCapabilities,
           timeoutMs: ROUTER_TASK_TIMEOUT_MS,
-          signal: abortController.signal,
+          signal: taskAbortController.signal,
         });
           if (abortController.signal.aborted || leaseLost) {
             const current = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, plan.id);
@@ -213,6 +220,7 @@ export class AgentRouterService {
           failed = true;
         } finally {
           clearInterval(heartbeat);
+          abortController.signal.removeEventListener('abort', forwardPlanAbort);
         }
       }
       const result = this.resultFromTasks(input, plan, results);
@@ -277,8 +285,15 @@ export class AgentRouterService {
     }
     appendRouterEvent(this.db, input.planId, task.id, { type: 'task_started', ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, parallel: true });
     let leaseLost = false;
+    const taskAbortController = new AbortController();
+    const forwardPlanAbort = () => taskAbortController.abort();
+    if (abortController.signal.aborted) taskAbortController.abort();
+    else abortController.signal.addEventListener('abort', forwardPlanAbort, { once: true });
     const heartbeat = setInterval(() => {
-      if (!renewRouterPlan(this.db, input.planId, workerId) || !renewRouterTask(this.db, task.id, workerId)) leaseLost = true;
+      if (!renewRouterPlan(this.db, input.planId, workerId) || !renewRouterTask(this.db, task.id, workerId)) {
+        leaseLost = true;
+        taskAbortController.abort();
+      }
     }, 30_000);
     try {
       const session = createAccessibleRuntimeSession(this.db, input.actorUserId, input.workspaceJid, {
@@ -294,7 +309,7 @@ export class AgentRouterService {
         idempotencyKey: `router:${input.planId}:${task.id}`,
         capabilityScope: task.spec.requiredCapabilities,
         timeoutMs: ROUTER_TASK_TIMEOUT_MS,
-        signal: abortController.signal,
+        signal: taskAbortController.signal,
       });
       if (abortController.signal.aborted || leaseLost) {
         const currentPlan = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, input.planId);
@@ -317,6 +332,7 @@ export class AgentRouterService {
       return { taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'failed', text: null, error: message };
     } finally {
       clearInterval(heartbeat);
+      abortController.signal.removeEventListener('abort', forwardPlanAbort);
     }
   }
 
