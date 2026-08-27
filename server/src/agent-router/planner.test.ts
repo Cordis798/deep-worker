@@ -17,11 +17,14 @@ describe('agent router planner', () => {
     expect(plan.tasks).toHaveLength(2);
     expect(plan.tasks.map((task) => task.agentProfileId)).toEqual(['eng', 'ops']);
     expect(plan.tasks[1].dependsOn).toEqual([0]);
+    expect(plan.tasks.map((task) => task.risk)).toEqual(['write', 'external']);
+    expect(plan.risk).toBe('external');
   });
 
   it('无匹配岗位时安全回退到通用 Agent', () => {
     const plan = buildAgentRouterPlan('写一份总结', [{ ...candidates[0], capabilities: [] }]);
     expect(plan.tasks).toHaveLength(1);
     expect(plan.tasks[0].requiredCapabilities).toEqual([]);
+    expect(plan.risk).toBe('read');
   });
 });

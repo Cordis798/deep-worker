@@ -2,14 +2,16 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth.js';
 import { canWorkspaceAction } from '../workspace-acl.js';
-import { AgentRouterService, RouterDispatchBusyError } from '../agent-router/service.js';
+import { AgentRouterService, RouterApprovalRequiredError, RouterDispatchBusyError } from '../agent-router/service.js';
 import {
+  approveRouterPlan,
   createAgentBinding,
   getRouterPlan,
   getRouterTasks,
   listAgentBindings,
   listRouterEvents,
   listRouterPlans,
+  rejectRouterPlan,
   removeAgentBinding,
 } from '../agent-router/store.js';
 import type Database from 'better-sqlite3';
@@ -44,6 +46,12 @@ function publicPlan(plan: ReturnType<typeof getRouterPlan>) {
     created_at: plan.createdAt,
     updated_at: plan.updatedAt,
     completed_at: plan.completedAt,
+    plan_hash: plan.planHash,
+    approval_required: plan.approvalRequired,
+    approval_status: plan.approvalStatus,
+    approval_expires_at: plan.approvalExpiresAt,
+    approved_by: plan.approvedBy,
+    approved_at: plan.approvedAt,
   };
 }
 
@@ -115,9 +123,23 @@ export function createAgentRouterRoutes(db: Database.Database, router: AgentRout
       const result = await router.dispatch({ actorUserId: user.id, workspaceJid: c.req.param('jid'), planId: c.req.param('planId') });
       return c.json({ result });
     } catch (error) {
-      const status = error instanceof RouterDispatchBusyError ? 409 : 404;
+      const status = error instanceof RouterDispatchBusyError || error instanceof RouterApprovalRequiredError ? 409 : 404;
       return c.json({ error: error instanceof Error ? error.message : String(error) }, status);
     }
+  });
+
+  app.post('/:jid/router/plans/:planId/approve', (c) => {
+    const result = approveRouterPlan(db, c.get('user')!.id, c.req.param('jid'), c.req.param('planId'));
+    if (result.ok) return c.json({ approval_status: result.status });
+    const status = result.reason === 'forbidden' ? 403 : result.reason === 'not_found' ? 404 : 409;
+    return c.json({ error: `审批失败：${result.reason}` }, status);
+  });
+
+  app.post('/:jid/router/plans/:planId/reject', (c) => {
+    const result = rejectRouterPlan(db, c.get('user')!.id, c.req.param('jid'), c.req.param('planId'));
+    if (result.ok) return c.json({ approval_status: result.status });
+    const status = result.reason === 'forbidden' ? 403 : result.reason === 'not_found' ? 404 : 409;
+    return c.json({ error: `审批失败：${result.reason}` }, status);
   });
 
   return app;

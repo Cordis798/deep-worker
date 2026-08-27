@@ -1,10 +1,12 @@
-import type { AgentRouterCandidate, AgentRouterPlanSpec, AgentRouterTaskSpec } from '@deep-worker/shared';
+import type { AgentRouterCandidate, AgentRouterPlanSpec, AgentRouterTaskRisk, AgentRouterTaskSpec } from '@deep-worker/shared';
 
-const INTENT_RULES: Array<{ intent: string; tokens: string[]; capabilities: string[] }> = [
-  { intent: 'engineering', tokens: ['代码', 'code', 'git', '测试', 'bug', '开发'], capabilities: ['code'] },
-  { intent: 'operations', tokens: ['部署', '发布', '监控', '日志', '告警', '上线', '运维'], capabilities: ['deploy'] },
-  { intent: 'sales', tokens: ['销售', '客户', 'crm', '邮件', '商机', '报价'], capabilities: ['crm'] },
+const INTENT_RULES: Array<{ intent: string; tokens: string[]; capabilities: string[]; risk: AgentRouterTaskRisk }> = [
+  { intent: 'engineering', tokens: ['代码', 'code', 'git', '测试', 'bug', '开发'], capabilities: ['code'], risk: 'write' },
+  { intent: 'operations', tokens: ['部署', '发布', '监控', '日志', '告警', '上线', '运维'], capabilities: ['deploy'], risk: 'external' },
+  { intent: 'sales', tokens: ['销售', '客户', 'crm', '邮件', '商机', '报价'], capabilities: ['crm'], risk: 'external' },
 ];
+
+const RISK_ORDER: AgentRouterTaskRisk[] = ['read', 'write', 'external', 'destructive'];
 
 function includesAny(text: string, tokens: string[]): boolean {
   const normalized = text.toLowerCase();
@@ -41,7 +43,7 @@ export function buildAgentRouterPlan(
   const distinctMatches = new Set(matchedRules.map((rule) => choose(candidates, rule.capabilities, rule.intent)?.bindingId).filter(Boolean));
   const taskRules = matchedRules.length > 1 && distinctMatches.size > 1
     ? matchedRules
-    : [{ intent: inferred.intent, capabilities: inferred.requiredCapabilities, tokens: [] }];
+    : [{ intent: inferred.intent, capabilities: inferred.requiredCapabilities, tokens: [], risk: 'read' }];
   for (const [ordinal, rule] of taskRules.entries()) {
     const candidate = choose(candidates, rule.capabilities, rule.intent);
     if (!candidate) continue;
@@ -53,12 +55,17 @@ export function buildAgentRouterPlan(
       requiredCapabilities: rule.capabilities,
       input: message,
       dependsOn: ordinal === 0 ? [] : [ordinal - 1],
+      risk: rule.risk,
     });
   }
   if (tasks.length === 0 && candidates.length > 0) {
     const fallback = choose(candidates, [], 'general') ?? candidates[0];
-    tasks.push({ ordinal: 0, bindingId: fallback.bindingId, agentProfileId: fallback.agentProfileId, title: `${fallback.name}：通用处理`, requiredCapabilities: [], input: message, dependsOn: [] });
+    tasks.push({ ordinal: 0, bindingId: fallback.bindingId, agentProfileId: fallback.agentProfileId, title: `${fallback.name}：通用处理`, requiredCapabilities: [], input: message, dependsOn: [], risk: 'read' });
   }
+  const risk = tasks.reduce<AgentRouterTaskRisk>(
+    (current, task) => RISK_ORDER.indexOf(task.risk) > RISK_ORDER.indexOf(current) ? task.risk : current,
+    'read',
+  );
   return {
     intent: inferred.intent,
     requiredCapabilities: inferred.requiredCapabilities,
@@ -69,5 +76,6 @@ export function buildAgentRouterPlan(
       : tasks.length === 1
         ? '未形成跨岗位依赖，回退为单 Agent 执行'
         : '没有满足能力与权限要求的 Agent',
+    risk,
   };
 }

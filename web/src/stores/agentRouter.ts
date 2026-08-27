@@ -22,10 +22,13 @@ export interface RouterTask {
 export interface RouterPlan {
   id: string;
   intent: string;
-  status: 'planned' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'planned' | 'awaiting_approval' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'uncertain' | 'validation_failed';
   input: string;
-  route: { tasks: unknown[]; explanation: string };
+  route: { tasks: unknown[]; explanation: string; risk?: 'read' | 'write' | 'external' | 'destructive' };
   result: { text: string | null } | null;
+  approval_required?: boolean;
+  approval_status?: 'not_required' | 'pending' | 'approved' | 'rejected' | 'expired';
+  approval_expires_at?: string | null;
 }
 
 interface AgentRouterState {
@@ -36,6 +39,8 @@ interface AgentRouterState {
   load: (workspaceId: string) => Promise<void>;
   createPlan: (workspaceId: string, message: string) => Promise<RouterPlan>;
   dispatch: (workspaceId: string, planId: string) => Promise<void>;
+  approve: (workspaceId: string, planId: string) => Promise<void>;
+  reject: (workspaceId: string, planId: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -78,6 +83,28 @@ export const useAgentRouterStore = create<AgentRouterState>((set, get) => ({
       set((state) => ({ plans: { ...state.plans, [workspaceId]: (state.plans[workspaceId] ?? []).map((plan) => plan.id === planId ? { ...plan, status: data.result.status } : plan) } }));
     } catch (error) {
       set({ error: getErrorMessage(error, '路由调度失败') });
+      throw error;
+    }
+  },
+
+  approve: async (workspaceId, planId) => {
+    set({ error: null });
+    try {
+      await api.post(`/api/workspaces/${encodeURIComponent(workspaceId)}/router/plans/${encodeURIComponent(planId)}/approve`);
+      set((state) => ({ plans: { ...state.plans, [workspaceId]: (state.plans[workspaceId] ?? []).map((plan) => plan.id === planId ? { ...plan, status: 'planned', approval_status: 'approved' } : plan) } }));
+    } catch (error) {
+      set({ error: getErrorMessage(error, '审批失败') });
+      throw error;
+    }
+  },
+
+  reject: async (workspaceId, planId) => {
+    set({ error: null });
+    try {
+      await api.post(`/api/workspaces/${encodeURIComponent(workspaceId)}/router/plans/${encodeURIComponent(planId)}/reject`);
+      set((state) => ({ plans: { ...state.plans, [workspaceId]: (state.plans[workspaceId] ?? []).map((plan) => plan.id === planId ? { ...plan, status: 'planned', approval_status: 'rejected' } : plan) } }));
+    } catch (error) {
+      set({ error: getErrorMessage(error, '拒绝审批失败') });
       throw error;
     }
   },

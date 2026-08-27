@@ -29,6 +29,7 @@ export interface ChannelManagerOptions {
   registry?: ChannelAdapterRegistry;
   onAgentMessage?: (input: ChannelAgentMessageInput) => Promise<string | null>;
   onRouterMessage?: (input: ChannelAgentMessageInput) => Promise<string | null>;
+  onRouterApproval?: (input: { ownerUserId: string; planId: string; approved: boolean; message: ChannelInboundMessage; route: ChannelRoute }) => Promise<string | null>;
   retryBaseMs?: number;
   maxAttempts?: number;
 }
@@ -58,6 +59,7 @@ export class ChannelManager {
       mounts: this.mounts,
       onRouteMessage: options.onRouterMessage,
       onSingleMessage: options.onAgentMessage,
+      onRouterApproval: options.onRouterApproval,
     });
   }
 

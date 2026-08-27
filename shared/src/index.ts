@@ -19,10 +19,12 @@ export type {
 } from './stream-event.js';
 
 export type {
+  AgentRouterApprovalStatus,
   AgentRouterCandidate,
   AgentRouterPlanSpec,
   AgentRouterPlanStatus,
   AgentRouterResult,
+  AgentRouterTaskRisk,
   AgentRouterTaskResult,
   AgentRouterTaskSpec,
   AgentRouterTaskStatus,

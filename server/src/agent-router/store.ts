@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type {
+  AgentRouterApprovalStatus,
   AgentRouterCandidate,
   AgentRouterPlanSpec,
   AgentRouterPlanStatus,
@@ -35,6 +36,12 @@ export interface AgentRouterPlanRow {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  planHash: string | null;
+  approvalRequired: boolean;
+  approvalStatus: AgentRouterApprovalStatus;
+  approvalExpiresAt: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
 }
 
 export interface AgentRouterTaskRow {
@@ -63,6 +70,12 @@ interface PlanDbRow {
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+  approval_required: number;
+  approval_status: AgentRouterApprovalStatus;
+  approval_expires_at: string | null;
+  approval_hash: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
 }
 
 function parse<T>(value: string | null): T | null {
@@ -71,21 +84,40 @@ function parse<T>(value: string | null): T | null {
 }
 
 function mapPlan(row: PlanDbRow): AgentRouterPlanRow {
+  const approvalStatus = row.approval_status ?? 'not_required';
   return {
     id: row.id,
     workspaceJid: row.workspace_jid,
     sessionId: row.session_id,
     actorUserId: row.actor_user_id,
     intent: row.intent,
-    status: row.status,
+    status: row.status === 'planned' && approvalStatus === 'pending' ? 'awaiting_approval' : row.status,
     input: parse<{ message: string }>(row.input_json)?.message ?? '',
-    route: parse<AgentRouterPlanSpec>(row.route_json) ?? { intent: row.intent, requiredCapabilities: [], tasks: [], fallback: 'reject', explanation: '' },
+    route: parse<AgentRouterPlanSpec>(row.route_json) ?? { intent: row.intent, requiredCapabilities: [], tasks: [], fallback: 'reject', explanation: '', risk: 'read' },
     result: parse<AgentRouterResult>(row.result_json),
     capabilityHash: row.capability_hash,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
+    planHash: row.approval_hash,
+    approvalRequired: row.approval_required === 1,
+    approvalStatus,
+    approvalExpiresAt: row.approval_expires_at,
+    approvedBy: row.approved_by,
+    approvedAt: row.approved_at,
   };
+}
+
+export const ROUTER_APPROVAL_TTL_MS = 10 * 60 * 1000;
+
+function routerPlanHash(input: { workspaceJid: string; actorUserId: string; message: string; route: AgentRouterPlanSpec; capabilityHash: string | null }): string {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    workspaceJid: input.workspaceJid,
+    actorUserId: input.actorUserId,
+    message: input.message,
+    route: input.route,
+    capabilityHash: input.capabilityHash,
+  })).digest('hex');
 }
 
 export function listAgentBindings(db: Db, actorUserId: string, workspaceJid: string): AgentBindingRow[] | undefined {
@@ -167,13 +199,27 @@ export function createRouterPlan(
   if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'converse')) throw new Error('Workspace not found');
   const id = `arp_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
+  const approvalRequired = route.risk !== 'read';
+  const approvalStatus: AgentRouterApprovalStatus = approvalRequired ? 'pending' : 'not_required';
+  const approvalExpiresAt = approvalRequired ? new Date(Date.now() + ROUTER_APPROVAL_TTL_MS).toISOString() : null;
+  const approvalHash = routerPlanHash({ workspaceJid, actorUserId, message: input, route, capabilityHash });
   db.transaction(() => {
     db.prepare(
       `INSERT INTO agent_router_plans (
         id, workspace_jid, session_id, actor_user_id, intent, status,
-        input_json, route_json, capability_hash, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?)`,
-    ).run(id, workspaceJid, sessionId, actorUserId, route.intent, JSON.stringify({ message: input }), JSON.stringify(route), capabilityHash, now, now);
+        input_json, route_json, capability_hash, created_at, updated_at,
+        approval_required, approval_status, approval_expires_at, approval_hash,
+        approved_by, approved_at
+      ) VALUES (?, ?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+    ).run(id, workspaceJid, sessionId, actorUserId, route.intent, JSON.stringify({ message: input }), JSON.stringify(route), capabilityHash, now, now, approvalRequired ? 1 : 0, approvalStatus, approvalExpiresAt, approvalHash);
+    if (approvalRequired) {
+      db.prepare(
+        `INSERT INTO agent_router_approvals (
+          id, plan_id, workspace_jid, actor_user_id, plan_hash, status,
+          expires_at, decided_by, decided_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, ?, ?)`,
+      ).run(`ara_${crypto.randomUUID()}`, id, workspaceJid, actorUserId, approvalHash, approvalExpiresAt, now, now);
+    }
     const insert = db.prepare(
       `INSERT INTO agent_router_tasks (
         id, plan_id, ordinal, agent_binding_id, agent_profile_id, title,
@@ -187,14 +233,85 @@ export function createRouterPlan(
   return getRouterPlan(db, actorUserId, workspaceJid, id)!;
 }
 
+export type RouterApprovalMutation =
+  | { ok: true; status: 'approved' | 'rejected' }
+  | { ok: false; reason: 'not_found' | 'forbidden' | 'not_required' | 'expired' | 'already_decided' };
+
+export function expireRouterApprovals(db: Db, planId?: string, nowInput = new Date().toISOString()): number {
+  return db.transaction(() => {
+    const changed = db.prepare(
+      `UPDATE agent_router_approvals
+       SET status = 'expired', updated_at = ?
+       WHERE ${planId ? 'plan_id = ? AND ' : ''}status = 'pending' AND expires_at <= ?`,
+    ).run(...(planId ? [nowInput, planId, nowInput] : [nowInput, nowInput])).changes;
+    if (changed > 0) {
+      db.prepare(
+        `UPDATE agent_router_plans
+         SET approval_status = 'expired', updated_at = ?
+         WHERE approval_status = 'pending'
+           AND id IN (SELECT plan_id FROM agent_router_approvals WHERE status = 'expired' AND updated_at = ?)`
+      ).run(nowInput, nowInput);
+    }
+    return changed;
+  })();
+}
+
+function decideRouterApproval(
+  db: Db,
+  actorUserId: string,
+  workspaceJid: string,
+  planId: string,
+  decision: 'approved' | 'rejected',
+): RouterApprovalMutation {
+  expireRouterApprovals(db, planId);
+  if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'converse')) return { ok: false, reason: 'not_found' };
+  const plan = db.prepare(
+    `SELECT id, actor_user_id, approval_required, approval_status, approval_hash
+     FROM agent_router_plans WHERE id = ? AND workspace_jid = ?`,
+  ).get(planId, workspaceJid) as { id: string; actor_user_id: string; approval_required: number; approval_status: AgentRouterApprovalStatus; approval_hash: string | null } | undefined;
+  if (!plan) return { ok: false, reason: 'not_found' };
+  const access = getWorkspaceAccess(db, actorUserId, workspaceJid);
+  if (!access || (access.role !== 'workspace_admin' && plan.actor_user_id !== actorUserId)) return { ok: false, reason: 'forbidden' };
+  if (plan.approval_required !== 1) return { ok: false, reason: 'not_required' };
+  if (plan.approval_status === 'expired') return { ok: false, reason: 'expired' };
+  if (plan.approval_status !== 'pending' || !plan.approval_hash) return { ok: false, reason: 'already_decided' };
+  const now = new Date().toISOString();
+  const changed = db.transaction(() => {
+    const approval = db.prepare(
+      `UPDATE agent_router_approvals
+       SET status = ?, decided_by = ?, decided_at = ?, updated_at = ?
+       WHERE plan_id = ? AND status = 'pending' AND expires_at > ? AND plan_hash = ?`,
+    ).run(decision, actorUserId, now, now, planId, now, plan.approval_hash).changes;
+    if (approval !== 1) return false;
+    return db.prepare(
+      `UPDATE agent_router_plans
+       SET approval_status = ?, approved_by = ?, approved_at = ?, updated_at = ?
+       WHERE id = ? AND workspace_jid = ? AND approval_status = 'pending' AND approval_hash = ?`,
+    ).run(decision, decision === 'approved' ? actorUserId : null, decision === 'approved' ? now : null, now, planId, workspaceJid, plan.approval_hash).changes === 1;
+  })();
+  if (!changed) return { ok: false, reason: 'already_decided' };
+  appendRouterEvent(db, planId, null, { type: decision === 'approved' ? 'approval_approved' : 'approval_rejected', decidedBy: actorUserId });
+  return { ok: true, status: decision };
+}
+
+export function approveRouterPlan(db: Db, actorUserId: string, workspaceJid: string, planId: string): RouterApprovalMutation {
+  return decideRouterApproval(db, actorUserId, workspaceJid, planId, 'approved');
+}
+
+export function rejectRouterPlan(db: Db, actorUserId: string, workspaceJid: string, planId: string): RouterApprovalMutation {
+  return decideRouterApproval(db, actorUserId, workspaceJid, planId, 'rejected');
+}
+
 export function getRouterPlan(db: Db, actorUserId: string, workspaceJid: string, id: string): AgentRouterPlanRow | undefined {
   if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'view')) return undefined;
+  expireRouterApprovals(db, id);
   const row = db.prepare('SELECT * FROM agent_router_plans WHERE id = ? AND workspace_jid = ?').get(id, workspaceJid) as PlanDbRow | undefined;
   return row ? mapPlan(row) : undefined;
 }
 
 export function listRouterPlans(db: Db, actorUserId: string, workspaceJid: string): AgentRouterPlanRow[] | undefined {
   if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'view')) return undefined;
+  expireRouterApprovals(db);
   return (db.prepare('SELECT * FROM agent_router_plans WHERE workspace_jid = ? ORDER BY created_at DESC').all(workspaceJid) as PlanDbRow[]).map(mapPlan);
 }
 
@@ -231,6 +348,7 @@ export function listRouterTaskRows(db: Db, actorUserId: string, workspaceJid: st
       requiredCapabilities: parse<{ requiredCapabilities?: string[] }>(String(row.input_json))?.requiredCapabilities ?? [],
       input: parse<{ input?: string }>(String(row.input_json))?.input ?? '',
       dependsOn: parse<{ dependsOn?: number[] }>(String(row.input_json))?.dependsOn ?? [],
+      risk: parse<{ risk?: AgentRouterTaskSpec['risk'] }>(String(row.input_json))?.risk ?? 'read',
     },
     status: String(row.status) as AgentRouterTaskStatus,
     attempt: Number(row.attempt),

@@ -35,13 +35,21 @@ describe('agent router routes', () => {
 
     const planned = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '请修复代码并发布上线' }, cookie));
     expect(planned.status).toBe(201);
-    const plan = (await planned.json()) as { plan: { id: string; route: { tasks: unknown[] } } };
+    const plan = (await planned.json()) as { plan: { id: string; status: string; approval_required: boolean; route: { tasks: unknown[] } } };
     expect(plan.plan.route.tasks).toHaveLength(2);
+    expect(plan.plan.status).toBe('awaiting_approval');
+    expect(plan.plan.approval_required).toBe(true);
 
     const detail = await app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}`, { headers: { cookie: `dw_session=${cookie}` } });
     expect(detail.status).toBe(200);
     const detailBody = (await detail.json()) as { tasks: unknown[] };
     expect(detailBody.tasks).toHaveLength(2);
+    const blocked = await app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
+    expect(blocked.status).toBe(409);
+    const approved = await app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/approve`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
+    expect(approved.status).toBe(200);
+    const repeatedApproval = await app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/approve`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
+    expect(repeatedApproval.status).toBe(409);
     const [dispatched, concurrent] = await Promise.all([
       app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } }),
       app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } }),

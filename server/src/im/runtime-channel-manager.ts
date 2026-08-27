@@ -33,8 +33,18 @@ export function createRuntimeChannelManager(options: {
     },
     onRouterMessage: async ({ ownerUserId, message, route }) => {
       const plan = router.plan({ actorUserId: ownerUserId, workspaceJid: route.workspaceJid, sessionId: route.sessionId, message: message.text });
+      if (plan.approvalRequired) return `编排计划 ${plan.id} 需要审批（风险：${plan.route.risk}），请使用 /approve ${plan.id} 或 /reject ${plan.id}`;
       const result = await router.dispatch({ actorUserId: ownerUserId, workspaceJid: route.workspaceJid, planId: plan.id });
       return `编排${result.status === 'completed' ? '完成' : '未完全完成'}：${result.text ?? '无文本结果'}`;
+    },
+    onRouterApproval: async ({ ownerUserId, planId, approved, route }) => {
+      const result = approved
+        ? router.approve({ actorUserId: ownerUserId, workspaceJid: route.workspaceJid, planId })
+        : router.reject({ actorUserId: ownerUserId, workspaceJid: route.workspaceJid, planId });
+      if (!result.ok) return `审批失败：${result.reason}`;
+      if (!approved) return `计划 ${planId} 已拒绝`;
+      const dispatched = await router.dispatch({ actorUserId: ownerUserId, workspaceJid: route.workspaceJid, planId });
+      return `审批通过，编排${dispatched.status === 'completed' ? '完成' : '未完全完成'}：${dispatched.text ?? '无文本结果'}`;
     },
   });
 }

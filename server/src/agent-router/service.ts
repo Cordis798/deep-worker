@@ -9,6 +9,7 @@ import { getWorkspaceById } from '../workspaces.js';
 import { buildAgentRouterPlan } from './planner.js';
 import {
   appendRouterEvent,
+  approveRouterPlan,
   claimRouterPlan,
   claimRouterTask,
   createRouterPlan,
@@ -19,6 +20,7 @@ import {
   setRouterTaskStatus,
   renewRouterPlan,
   renewRouterTask,
+  rejectRouterPlan,
   skipRouterTask,
   type AgentBindingRow,
   type AgentRouterPlanRow,
@@ -30,6 +32,13 @@ export class RouterDispatchBusyError extends Error {
   constructor() {
     super('Router plan is already being dispatched');
     this.name = 'RouterDispatchBusyError';
+  }
+}
+
+export class RouterApprovalRequiredError extends Error {
+  constructor(public readonly approvalStatus: 'pending' | 'rejected' | 'expired') {
+    super(approvalStatus === 'pending' ? 'Router plan requires approval' : `Router plan approval is ${approvalStatus}`);
+    this.name = 'RouterApprovalRequiredError';
   }
 }
 
@@ -51,10 +60,21 @@ export class AgentRouterService {
     return createRouterPlan(this.db, input.actorUserId, input.workspaceJid, input.sessionId ?? null, input.message, route, capabilityHash);
   }
 
+  approve(input: { actorUserId: string; workspaceJid: string; planId: string }) {
+    return approveRouterPlan(this.db, input.actorUserId, input.workspaceJid, input.planId);
+  }
+
+  reject(input: { actorUserId: string; workspaceJid: string; planId: string }) {
+    return rejectRouterPlan(this.db, input.actorUserId, input.workspaceJid, input.planId);
+  }
+
   async dispatch(input: { actorUserId: string; workspaceJid: string; planId: string }): Promise<AgentRouterResult> {
     const plan = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, input.planId);
     const tasks = listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, input.planId);
     if (!plan || !tasks) throw new Error('Router plan not found');
+    if (plan.approvalRequired && plan.approvalStatus !== 'approved') {
+      throw new RouterApprovalRequiredError(plan.approvalStatus === 'pending' ? 'pending' : plan.approvalStatus === 'expired' ? 'expired' : 'rejected');
+    }
     if (plan.status === 'completed') return plan.result ?? this.resultFromTasks(input, plan, []);
     const workerId = `router-worker:${crypto.randomUUID()}`;
     if (!claimRouterPlan(this.db, plan.id, workerId)) {
