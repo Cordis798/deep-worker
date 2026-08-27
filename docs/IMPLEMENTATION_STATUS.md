@@ -10,10 +10,10 @@
 | Context 恢复 | 安全枚举 JSONL、成功恢复或记录脱敏的 reset 状态，失败后创建新上下文 | `pi-runner/src/pi-session-discovery.ts` |
 | Workspace ACL | `workspace_admin`、`member`、`viewer` 三层权限；会话、历史、复制和写入动作分别校验 | `server/src/workspace-acl.ts`、`server/src/routes/workspaces.ts` |
 | 岗位治理 | 工作区管理员可调整成员岗位和能力包；最后一名管理员不能被降权或撤销 | `server/src/workspace-acl.ts` |
-| 能力解析 | Skill 优先级、依赖、冲突、岗位 allow/deny、稳定 hash 与解析审计已落库；运行时可恢复受治理 MCP 连接配置 | `server/src/capabilities/capability-resolver.ts` |
+| 能力解析 | Skill 优先级、依赖、冲突、岗位 allow/deny、稳定 hash 与解析审计已落库；运行时可恢复受治理 MCP 连接配置，并按任务能力裁剪 MCP/Plugin 交集 | `server/src/capabilities/capability-resolver.ts`、`server/src/capabilities/capability-governance.ts` |
 | Skill 注入 | 有效 Skill 会复制到隔离 Session 目录，再通过 SDK Resource Loader 加载 | `pi-runner/src/capability-injection.ts` |
 | MCP 工具桥接 | Pi Agent SDK 会话启动时发现受治理 MCP 工具，注册稳定名称的 custom tools；调用支持取消、结果截断和生命周期关闭 | `pi-runner/src/mcp-tool-bridge.ts` |
-| Agent Router | 根据任务意图、岗位标签和能力选择 Agent，并先按成员岗位能力包裁剪候选；持久化 Plan/Task/Event；有依赖任务按顺序执行，无依赖任务可按显式并行意图分批调度并汇总结果；高风险计划必须通过一次性审批，支持拒绝、过期和取消 | `server/src/agent-router/`、`server/src/capabilities/capability-governance.ts` |
+| Agent Router | 根据任务意图、岗位标签和能力选择 Agent，并先按成员岗位能力包裁剪候选；持久化 Plan/Task/Event；有依赖任务按顺序执行，纯只读任务可按显式并行意图分批调度并汇总结果；高风险计划必须通过一次性审批，支持拒绝、过期和取消；派发前复核计划能力 hash、Agent 绑定和创建者身份 | `server/src/agent-router/`、`server/src/capabilities/capability-governance.ts` |
 | 并发安全 | Plan 与 Task 使用 SQLite 租约；重复 dispatch 返回冲突，旧 worker 不能覆盖新租约结果 | `server/src/agent-router/store.ts` |
 | Web/IM | Web 可创建、审批、取消和调度计划；IM 支持 `/route`、`/single`、`/approve`、`/reject`、`/cancel`，两者进入同一执行链 | `web/src/pages/ChatPage.tsx`、`server/src/im/` |
 
@@ -25,6 +25,7 @@
 - MCP 工具名称带有服务端前缀以避免冲突；调用结果限制大小，连接在 Session 释放时关闭，取消信号不会承诺回滚外部副作用。
 - Router 子任务只接收任务说明和已完成的前置结果；计划、任务和事件均写入 SQLite，可在进程重启后依据租约恢复。
 - 取消会原子释放计划/任务租约并取消未开始任务；活跃 SDK 会收到 AbortSignal，已发生的外部副作用不承诺回滚。
+- 每个 Router 子任务带有 10 分钟运行上限；成员降权或撤销对话权限时，运行中的回合会被中止且不自动重试。
 
 ## 后续演进顺序
 
