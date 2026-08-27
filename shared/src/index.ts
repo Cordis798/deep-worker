@@ -17,3 +17,13 @@ export type {
   StreamEventType,
   StreamUsage,
 } from './stream-event.js';
+
+export type {
+  AgentRouterCandidate,
+  AgentRouterPlanSpec,
+  AgentRouterPlanStatus,
+  AgentRouterResult,
+  AgentRouterTaskResult,
+  AgentRouterTaskSpec,
+  AgentRouterTaskStatus,
+} from './agent-router.js';

@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 15;
+export const CURRENT_SCHEMA_VERSION = 16;
 
 export class MigrationError extends Error {}
 
@@ -876,6 +876,92 @@ function migrateCapabilityGovernance(db: Database.Database): void {
   `);
 }
 
+function migrateAgentRouter(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_agent_bindings (
+      id TEXT PRIMARY KEY,
+      workspace_jid TEXT NOT NULL,
+      agent_profile_id TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      capability_json TEXT NOT NULL DEFAULT '[]',
+      role_tags_json TEXT NOT NULL DEFAULT '[]',
+      priority INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(workspace_jid, agent_profile_id),
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE,
+      FOREIGN KEY (agent_profile_id) REFERENCES agent_profiles(id),
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_agent_bindings_route
+      ON workspace_agent_bindings(workspace_jid, enabled, priority DESC);
+
+    CREATE TABLE IF NOT EXISTS agent_router_plans (
+      id TEXT PRIMARY KEY,
+      workspace_jid TEXT NOT NULL,
+      session_id TEXT,
+      actor_user_id TEXT NOT NULL,
+      intent TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('planned', 'running', 'completed', 'failed', 'cancelled')),
+      input_json TEXT NOT NULL,
+      route_json TEXT NOT NULL,
+      result_json TEXT,
+      capability_hash TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT,
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE,
+      FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (session_id) REFERENCES runtime_sessions(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_router_plans_workspace
+      ON agent_router_plans(workspace_jid, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_agent_router_plans_status
+      ON agent_router_plans(status, updated_at);
+
+    CREATE TABLE IF NOT EXISTS agent_router_tasks (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL,
+      ordinal INTEGER NOT NULL,
+      agent_binding_id TEXT,
+      agent_profile_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      input_json TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'skipped')),
+      attempt INTEGER NOT NULL DEFAULT 0,
+      lease_owner TEXT,
+      lease_expires_at TEXT,
+      result_json TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT,
+      UNIQUE(plan_id, ordinal),
+      FOREIGN KEY (plan_id) REFERENCES agent_router_plans(id) ON DELETE CASCADE,
+      FOREIGN KEY (agent_binding_id) REFERENCES workspace_agent_bindings(id) ON DELETE SET NULL,
+      FOREIGN KEY (agent_profile_id) REFERENCES agent_profiles(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_router_tasks_ready
+      ON agent_router_tasks(plan_id, status, ordinal);
+
+    CREATE TABLE IF NOT EXISTS agent_router_events (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL,
+      task_id TEXT,
+      ordinal INTEGER NOT NULL,
+      event_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(plan_id, ordinal),
+      FOREIGN KEY (plan_id) REFERENCES agent_router_plans(id) ON DELETE CASCADE,
+      FOREIGN KEY (task_id) REFERENCES agent_router_tasks(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_router_events_plan
+      ON agent_router_events(plan_id, ordinal);
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
@@ -892,6 +978,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 13, name: 'runtime_context', up: migrateRuntimeContext },
   { version: 14, name: 'workspace_members', up: migrateWorkspaceMembers },
   { version: 15, name: 'capability_governance', up: migrateCapabilityGovernance },
+  { version: 16, name: 'agent_router', up: migrateAgentRouter },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {
