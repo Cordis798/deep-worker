@@ -43,7 +43,7 @@ export function buildAgentRouterPlan(
   const distinctMatches = new Set(matchedRules.map((rule) => choose(candidates, rule.capabilities, rule.intent)?.bindingId).filter(Boolean));
   const taskRules = matchedRules.length > 1 && distinctMatches.size > 1
     ? matchedRules
-    : [{ intent: inferred.intent, capabilities: inferred.requiredCapabilities, tokens: [], risk: 'read' }];
+    : [{ intent: inferred.intent, capabilities: inferred.requiredCapabilities, tokens: [], risk: 'read' as const }];
   for (const [ordinal, rule] of taskRules.entries()) {
     const candidate = choose(candidates, rule.capabilities, rule.intent);
     if (!candidate) continue;
