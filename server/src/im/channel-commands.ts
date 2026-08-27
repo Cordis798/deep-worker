@@ -17,6 +17,7 @@ export type ChannelCommand =
   | { kind: 'single'; message: string }
   | { kind: 'approve'; planId: string }
   | { kind: 'reject'; planId: string }
+  | { kind: 'cancel'; planId: string }
   | { kind: 'clear' }
   | { kind: 'help' }
   | { kind: 'unknown'; name: string };
@@ -49,10 +50,11 @@ export function parseChannelCommand(value: string): ChannelCommand | null {
   if (name === 'single') return { kind: 'single', message: parts.join(' ').trim() };
   if (name === 'approve') return { kind: 'approve', planId: parts.join(' ').trim() };
   if (name === 'reject') return { kind: 'reject', planId: parts.join(' ').trim() };
+  if (name === 'cancel') return { kind: 'cancel', planId: parts.join(' ').trim() };
   return { kind: 'unknown', name };
 }
 
-const HELP_TEXT = '可用命令：/list、/status、/where、/bind <工作区 JID>、/unbind、/new [名称]、/route <跨岗位任务>、/single <普通对话>、/approve <计划 ID>、/reject <计划 ID>、/clear、/help';
+const HELP_TEXT = '可用命令：/list、/status、/where、/bind <工作区 JID>、/unbind、/new [名称]、/route <跨岗位任务>、/single <普通对话>、/approve <计划 ID>、/reject <计划 ID>、/cancel <计划 ID>、/clear、/help';
 
 export function createChannelCommandService(options: {
   db: Database.Database;
@@ -61,6 +63,7 @@ export function createChannelCommandService(options: {
   onRouteMessage?: (input: { ownerUserId: string; message: ChannelInboundMessage; route: NonNullable<Extract<ReturnType<MountService['resolveInbound']>, { status: 'resolved' }>['route']> }) => Promise<string | null>;
   onSingleMessage?: (input: { ownerUserId: string; message: ChannelInboundMessage; route: NonNullable<Extract<ReturnType<MountService['resolveInbound']>, { status: 'resolved' }>['route']> }) => Promise<string | null>;
   onRouterApproval?: (input: { ownerUserId: string; planId: string; approved: boolean; message: ChannelInboundMessage; route: NonNullable<Extract<ReturnType<MountService['resolveInbound']>, { status: 'resolved' }>['route']> }) => Promise<string | null>;
+  onRouterCancel?: (input: { ownerUserId: string; planId: string; message: ChannelInboundMessage; route: NonNullable<Extract<ReturnType<MountService['resolveInbound']>, { status: 'resolved' }>['route']> }) => Promise<string | null>;
 }) {
   async function execute(value: string, context: ChannelCommandContext): Promise<ChannelCommandResult> {
     const command = parseChannelCommand(value);
@@ -94,12 +97,14 @@ export function createChannelCommandService(options: {
     }
 
     const resolved = options.mounts.resolveInbound({ ownerUserId: context.ownerUserId, message: context.message });
-    if (command.kind === 'approve' || command.kind === 'reject') {
-      if (!command.planId) return { handled: true, reply: command.kind === 'approve' ? '用法：/approve <计划 ID>' : '用法：/reject <计划 ID>' };
+    if (command.kind === 'approve' || command.kind === 'reject' || command.kind === 'cancel') {
+      if (!command.planId) return { handled: true, reply: command.kind === 'approve' ? '用法：/approve <计划 ID>' : command.kind === 'reject' ? '用法：/reject <计划 ID>' : '用法：/cancel <计划 ID>' };
       if (resolved.status !== 'resolved') return { handled: true, reply: resolved.status === 'unbound' ? '当前群聊尚未绑定工作区。' : '当前聊天暂时没有可用路由。' };
-      if (!options.onRouterApproval) return { handled: true, reply: '当前渠道未启用审批操作。' };
-      const reply = await options.onRouterApproval({ ownerUserId: context.ownerUserId, planId: command.planId, approved: command.kind === 'approve', message: context.message, route: resolved.route });
-      return { handled: true, reply: reply ?? '审批操作已提交。' };
+      if (command.kind === 'cancel' ? !options.onRouterCancel : !options.onRouterApproval) return { handled: true, reply: command.kind === 'cancel' ? '当前渠道未启用取消操作。' : '当前渠道未启用审批操作。' };
+      const reply = command.kind === 'cancel'
+        ? await options.onRouterCancel?.({ ownerUserId: context.ownerUserId, planId: command.planId, message: context.message, route: resolved.route })
+        : await options.onRouterApproval?.({ ownerUserId: context.ownerUserId, planId: command.planId, approved: command.kind === 'approve', message: context.message, route: resolved.route });
+      return { handled: true, reply: reply ?? (command.kind === 'cancel' ? '取消操作已提交。' : '审批操作已提交。') };
     }
     if (command.kind === 'route' || command.kind === 'single') {
       if (!command.message) return { handled: true, reply: command.kind === 'route' ? '用法：/route <跨岗位任务>' : '用法：/single <普通对话>' };

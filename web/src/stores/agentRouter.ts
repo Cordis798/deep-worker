@@ -41,6 +41,7 @@ interface AgentRouterState {
   dispatch: (workspaceId: string, planId: string) => Promise<void>;
   approve: (workspaceId: string, planId: string) => Promise<void>;
   reject: (workspaceId: string, planId: string) => Promise<void>;
+  cancel: (workspaceId: string, planId: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -105,6 +106,17 @@ export const useAgentRouterStore = create<AgentRouterState>((set, get) => ({
       set((state) => ({ plans: { ...state.plans, [workspaceId]: (state.plans[workspaceId] ?? []).map((plan) => plan.id === planId ? { ...plan, status: 'planned', approval_status: 'rejected' } : plan) } }));
     } catch (error) {
       set({ error: getErrorMessage(error, '拒绝审批失败') });
+      throw error;
+    }
+  },
+
+  cancel: async (workspaceId, planId) => {
+    set({ error: null });
+    try {
+      await api.post(`/api/workspaces/${encodeURIComponent(workspaceId)}/router/plans/${encodeURIComponent(planId)}/cancel`);
+      set((state) => ({ plans: { ...state.plans, [workspaceId]: (state.plans[workspaceId] ?? []).map((plan) => plan.id === planId ? { ...plan, status: 'cancelled' } : plan) } }));
+    } catch (error) {
+      set({ error: getErrorMessage(error, '取消编排失败') });
       throw error;
     }
   },

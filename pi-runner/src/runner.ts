@@ -31,6 +31,7 @@ export interface AgentRunRequest {
   provider?: PiProviderSelection;
   containerMounts?: Array<{ hostPath: string; containerPath: string; readonly: boolean }>;
   containerLimits?: { memoryMb?: number; cpus?: number; pids?: number; tmpfsMb?: number };
+  abortSignal?: AbortSignal;
 }
 
 export interface PiProviderSelection {
@@ -149,7 +150,7 @@ export class PiRunner implements AgentRunner {
             }
           });
           try {
-            return await this.promptSdkSession(session, prompt, request.timeoutMs);
+            return await this.promptSdkSession(session, prompt, request.timeoutMs, request.abortSignal);
           } finally {
             unsubscribe();
           }
@@ -174,21 +175,39 @@ export class PiRunner implements AgentRunner {
     session: RuntimeSession,
     prompt: string,
     timeoutMs?: number,
+    abortSignal?: AbortSignal,
   ): Promise<RuntimeResult> {
-    if (!timeoutMs) return session.prompt({ text: prompt });
+    if (abortSignal?.aborted) {
+      await session.abort().catch(() => undefined);
+      throw new Error('Pi SDK prompt aborted');
+    }
     let timer: NodeJS.Timeout | undefined;
+    let abortHandler: (() => void) | undefined;
+    const abortPromise = abortSignal
+      ? new Promise<never>((_resolve, reject) => {
+          abortHandler = () => {
+            void session.abort().catch(() => undefined);
+            reject(new Error('Pi SDK prompt aborted'));
+          };
+          abortSignal.addEventListener('abort', abortHandler, { once: true });
+        })
+      : undefined;
     try {
+      const promptPromise = session.prompt({ text: prompt });
+      if (!timeoutMs && !abortPromise) return await promptPromise;
       return await Promise.race([
-        session.prompt({ text: prompt }),
-        new Promise<never>((_resolve, reject) => {
+        promptPromise,
+        ...(timeoutMs ? [new Promise<never>((_resolve, reject) => {
           timer = setTimeout(() => {
             void session.abort().catch(() => undefined);
             reject(new Error(`Pi SDK prompt timed out after ${timeoutMs}ms`));
           }, timeoutMs);
-        }),
+        })] : []),
+        ...(abortPromise ? [abortPromise] : []),
       ]);
     } finally {
       if (timer) clearTimeout(timer);
+      if (abortHandler) abortSignal?.removeEventListener('abort', abortHandler);
     }
   }
 
@@ -235,6 +254,8 @@ export class PiRunner implements AgentRunner {
         if (request.provider && client.setModel) {
           await client.setModel(request.provider.provider, request.provider.modelId);
         }
+        const abortHandler = request.abortSignal ? () => { void this.legacySessions!.invalidate(request.sessionId); } : undefined;
+        if (abortHandler) request.abortSignal!.addEventListener('abort', abortHandler, { once: true });
         const completedEvents = await client.promptAndWait(prompt, {
           timeoutMs: request.timeoutMs,
           onEvent: (rawEvent) => {
@@ -248,6 +269,8 @@ export class PiRunner implements AgentRunner {
               onEvent?.(event);
             }
           },
+        }).finally(() => {
+          if (abortHandler) request.abortSignal?.removeEventListener('abort', abortHandler);
         });
         if (rawEvents.length === 0) rawEvents.push(...completedEvents);
         reply = extractFinalReply(rawEvents);
@@ -286,8 +309,17 @@ export class FakePiRunner implements AgentRunner {
 
   async run(request: AgentRunRequest, onEvent?: AgentEventListener): Promise<AgentRunResult> {
     this.calls.push(request);
-    if (this.options.delayMs > 0)
-      await new Promise<void>((resolve) => setTimeout(resolve, this.options.delayMs));
+    if (request.abortSignal?.aborted) throw new Error('fake runner aborted');
+    if (this.options.delayMs > 0) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, this.options.delayMs);
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(new Error('fake runner aborted'));
+        };
+        request.abortSignal?.addEventListener('abort', onAbort, { once: true });
+      });
+    }
     if (this.failures < this.options.failuresBeforeSuccess) {
       this.failures += 1;
       throw new Error('fake temporary failure');

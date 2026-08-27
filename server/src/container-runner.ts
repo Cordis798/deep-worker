@@ -210,7 +210,7 @@ export class ContainerRunner implements AgentRunner {
       }
     });
     try {
-      const result = await this.promptWithTimeout(session.client, prompt, request.timeoutMs);
+      const result = await this.promptWithTimeout(session.client, prompt, request.timeoutMs, request.abortSignal);
       if (result.finalizationReason === 'error') {
         throw new Error(result.error ?? `容器 SDK 停止：${result.stopReason ?? 'error'}`);
       }
@@ -306,21 +306,39 @@ export class ContainerRunner implements AgentRunner {
     client: ContainerWorkerClient,
     prompt: string,
     timeoutMs?: number,
+    abortSignal?: AbortSignal,
   ) {
-    if (!timeoutMs) return client.prompt({ text: prompt });
+    if (abortSignal?.aborted) {
+      await client.abort().catch(() => undefined);
+      throw new Error('容器 SDK 任务已取消');
+    }
     let timer: NodeJS.Timeout | undefined;
+    let abortHandler: (() => void) | undefined;
+    const abortPromise = abortSignal
+      ? new Promise<never>((_resolve, reject) => {
+          abortHandler = () => {
+            void client.abort().catch(() => undefined);
+            reject(new Error('容器 SDK 任务已取消'));
+          };
+          abortSignal.addEventListener('abort', abortHandler, { once: true });
+        })
+      : undefined;
     try {
+      const promptPromise = client.prompt({ text: prompt });
+      if (!timeoutMs && !abortPromise) return await promptPromise;
       return await Promise.race([
-        client.prompt({ text: prompt }),
-        new Promise<never>((_resolve, reject) => {
+        promptPromise,
+        ...(timeoutMs ? [new Promise<never>((_resolve, reject) => {
           timer = setTimeout(() => {
             void client.abort().catch(() => undefined);
             reject(new Error(`容器 SDK 任务超时：${timeoutMs}ms`));
           }, timeoutMs);
-        }),
+        })] : []),
+        ...(abortPromise ? [abortPromise] : []),
       ]);
     } finally {
       if (timer) clearTimeout(timer);
+      if (abortHandler) abortSignal?.removeEventListener('abort', abortHandler);
     }
   }
 }

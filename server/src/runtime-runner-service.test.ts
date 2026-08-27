@@ -121,6 +121,40 @@ describe('RuntimeRunnerService', () => {
     await service.close();
   });
 
+  it('收到取消信号时终止当前 Runner 且不触发重试', async () => {
+    const calls: string[] = [];
+    const runner: AgentRunner = {
+      async run(request) {
+        calls.push(request.message);
+        return await new Promise<import('@deep-worker/pi-runner').AgentRunResult>((resolve, reject) => {
+          const timer = setTimeout(() => resolve({ sessionId: request.sessionId, reply: '不应完成', events: [], attempts: 1 }), 100);
+          request.abortSignal?.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new Error('runner aborted'));
+          }, { once: true });
+        });
+      },
+      async close() {},
+    };
+    const service = new RuntimeRunnerService({ db, runner, retryBaseMs: 0, maxAttempts: 3 });
+    const controller = new AbortController();
+    const pending = service.submit({
+      ownerUserId: 'u1',
+      workspaceJid: 'w1',
+      sessionId: 's1',
+      message: '取消任务',
+      idempotencyKey: 'cancel-task',
+      signal: controller.signal,
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    const result = await pending;
+    expect(result.turn.status).toBe('failed');
+    expect(result.turn.error).toContain('aborted');
+    expect(calls).toHaveLength(1);
+    await service.close();
+  });
+
   it('retries a failed runner and preserves the final durable state', async () => {
     const runner = new FakePiRunner({ response: 'recovered', failuresBeforeSuccess: 2 });
     const service = new RuntimeRunnerService({

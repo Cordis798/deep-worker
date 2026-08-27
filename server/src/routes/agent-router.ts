@@ -142,5 +142,12 @@ export function createAgentRouterRoutes(db: Database.Database, router: AgentRout
     return c.json({ error: `审批失败：${result.reason}` }, status);
   });
 
+  app.post('/:jid/router/plans/:planId/cancel', (c) => {
+    const result = router.cancel({ actorUserId: c.get('user')!.id, workspaceJid: c.req.param('jid'), planId: c.req.param('planId') });
+    if (result.ok) return c.json({ success: true });
+    const status = result.reason === 'forbidden' ? 403 : result.reason === 'not_found' ? 404 : 409;
+    return c.json({ error: `取消失败：${result.reason}` }, status);
+  });
+
   return app;
 }

@@ -46,5 +46,9 @@ export function createRuntimeChannelManager(options: {
       const dispatched = await router.dispatch({ actorUserId: ownerUserId, workspaceJid: route.workspaceJid, planId });
       return `审批通过，编排${dispatched.status === 'completed' ? '完成' : '未完全完成'}：${dispatched.text ?? '无文本结果'}`;
     },
+    onRouterCancel: async ({ ownerUserId, planId, route }) => {
+      const result = router.cancel({ actorUserId: ownerUserId, workspaceJid: route.workspaceJid, planId });
+      return result.ok ? `计划 ${planId} 已取消` : `取消失败：${result.reason}`;
+    },
   });
 }

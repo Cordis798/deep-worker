@@ -60,5 +60,15 @@ describe('agent router routes', () => {
     expect(result.result.status).toBe('completed');
     expect(result.result.tasks).toHaveLength(2);
     expect(result.result.tasks.every((task) => task.status === 'completed')).toBe(true);
+
+    const cancelledPlanResponse = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '请修复代码' }, cookie));
+    const cancelledPlan = (await cancelledPlanResponse.json()) as { plan: { id: string } };
+    const cancelled = await app.request(`/api/workspaces/${jid}/router/plans/${cancelledPlan.plan.id}/cancel`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
+    expect(cancelled.status).toBe(200);
+    const cancelledDispatch = await app.request(`/api/workspaces/${jid}/router/plans/${cancelledPlan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
+    expect(cancelledDispatch.status).toBe(200);
+    const cancelledBody = (await cancelledDispatch.json()) as { result: { status: string; tasks: Array<{ status: string }> } };
+    expect(cancelledBody.result.status).toBe('cancelled');
+    expect(cancelledBody.result.tasks.every((task) => task.status === 'skipped')).toBe(true);
   });
 });

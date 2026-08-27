@@ -237,6 +237,10 @@ export type RouterApprovalMutation =
   | { ok: true; status: 'approved' | 'rejected' }
   | { ok: false; reason: 'not_found' | 'forbidden' | 'not_required' | 'expired' | 'already_decided' };
 
+export type RouterCancellationMutation =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'forbidden' | 'already_terminal' };
+
 export function expireRouterApprovals(db: Db, planId?: string, nowInput = new Date().toISOString()): number {
   return db.transaction(() => {
     const changed = db.prepare(
@@ -300,6 +304,48 @@ export function approveRouterPlan(db: Db, actorUserId: string, workspaceJid: str
 
 export function rejectRouterPlan(db: Db, actorUserId: string, workspaceJid: string, planId: string): RouterApprovalMutation {
   return decideRouterApproval(db, actorUserId, workspaceJid, planId, 'rejected');
+}
+
+export function cancelRouterPlan(db: Db, actorUserId: string, workspaceJid: string, planId: string): RouterCancellationMutation {
+  if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'converse')) return { ok: false, reason: 'not_found' };
+  const plan = db.prepare(
+    `SELECT id, actor_user_id, status FROM agent_router_plans
+     WHERE id = ? AND workspace_jid = ?`,
+  ).get(planId, workspaceJid) as { id: string; actor_user_id: string; status: AgentRouterPlanStatus } | undefined;
+  if (!plan) return { ok: false, reason: 'not_found' };
+  const access = getWorkspaceAccess(db, actorUserId, workspaceJid);
+  if (!access || (access.role !== 'workspace_admin' && plan.actor_user_id !== actorUserId)) return { ok: false, reason: 'forbidden' };
+  if (!['planned', 'running'].includes(plan.status)) return { ok: false, reason: 'already_terminal' };
+  const now = new Date().toISOString();
+  const changed = db.transaction(() => {
+    const updated = db.prepare(
+      `UPDATE agent_router_plans
+       SET status = 'cancelled', approval_status = CASE WHEN approval_status = 'pending' THEN 'rejected' ELSE approval_status END,
+           dispatch_owner = NULL, dispatch_lease_expires_at = NULL,
+           updated_at = ?, completed_at = ?
+       WHERE id = ? AND workspace_jid = ? AND status IN ('planned', 'running')`,
+    ).run(now, now, planId, workspaceJid).changes;
+    if (updated !== 1) return false;
+    db.prepare(
+      `UPDATE agent_router_tasks
+       SET status = CASE WHEN status IN ('queued', 'running') THEN 'skipped' ELSE status END,
+           error = CASE WHEN status IN ('queued', 'running') THEN '编排已取消' ELSE error END,
+           lease_owner = NULL, lease_expires_at = NULL, updated_at = ?, completed_at = CASE WHEN status IN ('queued', 'running') THEN ? ELSE completed_at END
+       WHERE plan_id = ?`,
+    ).run(now, now, planId);
+    db.prepare(
+      `UPDATE agent_router_approvals
+       SET status = CASE WHEN status = 'pending' THEN 'rejected' ELSE status END,
+           decided_by = CASE WHEN status = 'pending' THEN ? ELSE decided_by END,
+           decided_at = CASE WHEN status = 'pending' THEN ? ELSE decided_at END,
+           updated_at = ?
+       WHERE plan_id = ?`,
+    ).run(actorUserId, now, now, planId);
+    return true;
+  })();
+  if (!changed) return { ok: false, reason: 'already_terminal' };
+  appendRouterEvent(db, planId, null, { type: 'plan_cancelled', cancelledBy: actorUserId });
+  return { ok: true };
 }
 
 export function getRouterPlan(db: Db, actorUserId: string, workspaceJid: string, id: string): AgentRouterPlanRow | undefined {

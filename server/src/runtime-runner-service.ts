@@ -45,6 +45,7 @@ export interface RuntimeRunnerMessageInput {
   outputContract?: string;
   timeoutMs?: number;
   capabilities?: AgentRunRequest['capabilities'];
+  signal?: AbortSignal;
 }
 
 export interface RuntimeRunnerResult {
@@ -170,6 +171,7 @@ export class RuntimeRunnerService {
         outputContract: input.outputContract,
         timeoutMs: input.timeoutMs,
         capabilities: input.capabilities,
+        signal: input.signal,
       }),
     );
     return result.value;
@@ -193,7 +195,7 @@ export class RuntimeRunnerService {
 
   private async processTurn(
     turnId: string,
-    options: { systemPrompt?: string; outputContract?: string; timeoutMs?: number; capabilities?: AgentRunRequest['capabilities'] },
+    options: { systemPrompt?: string; outputContract?: string; timeoutMs?: number; capabilities?: AgentRunRequest['capabilities']; signal?: AbortSignal },
   ): Promise<RuntimeRunnerResult> {
     const first = getRunnerTurnById(this.db, turnId);
     if (!first) throw new Error('Runner turn not found');
@@ -256,6 +258,7 @@ export class RuntimeRunnerService {
           identityHash: profile?.identity_hash,
           capabilities,
           capabilityHash: capabilities?.hash,
+          abortSignal: options.signal,
           provider: selectedProvider
             ? mapProviderToPiProvider(selectedProvider, getProviderCredentials(this.db, principalUserId, selectedProvider.id))
             : undefined,
@@ -299,7 +302,7 @@ export class RuntimeRunnerService {
         if (typeof selectedProviderId === 'string') selectedProviderPool?.reportFailure(selectedProviderId, true);
         const message = error instanceof Error ? error.message : String(error);
         const current = getRunnerTurnById(this.db, turnId)!;
-        if (shouldRetryRunnerError(message) && current.attempt < this.maxAttempts) {
+        if (!options.signal?.aborted && shouldRetryRunnerError(message) && current.attempt < this.maxAttempts) {
           const delayMs = Math.min(5_000, this.retryBaseMs * 2 ** (current.attempt - 1));
           retryRunnerTurn(
             this.db,

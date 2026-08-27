@@ -29,6 +29,9 @@ describe('渠道命令', () => {
     expect(parseChannelCommand('/clear')).toEqual({ kind: 'clear' });
     expect(parseChannelCommand('/route 修复代码并发布')).toEqual({ kind: 'route', message: '修复代码并发布' });
     expect(parseChannelCommand('/single 你好')).toEqual({ kind: 'single', message: '你好' });
+    expect(parseChannelCommand('/approve arp_demo')).toEqual({ kind: 'approve', planId: 'arp_demo' });
+    expect(parseChannelCommand('/reject arp_demo')).toEqual({ kind: 'reject', planId: 'arp_demo' });
+    expect(parseChannelCommand('/cancel arp_demo')).toEqual({ kind: 'cancel', planId: 'arp_demo' });
     expect(parseChannelCommand('普通消息')).toBeNull();
   });
 

@@ -41,6 +41,7 @@ export function ChatPage() {
   const dispatchRouterPlan = useAgentRouterStore((state) => state.dispatch);
   const approveRouterPlan = useAgentRouterStore((state) => state.approve);
   const rejectRouterPlan = useAgentRouterStore((state) => state.reject);
+  const cancelRouterPlan = useAgentRouterStore((state) => state.cancel);
 
   useEffect(() => {
     void load();
@@ -192,7 +193,7 @@ export function ChatPage() {
               <span className="font-semibold">可用 Agent：</span>
               {routerAgents.length ? routerAgents.map((agent) => <span key={agent.bindingId} className="rounded-full bg-white px-2 py-1">{agent.name} · {agent.capabilities.join('、') || '通用'}</span>) : <span>当前使用工作区默认 Agent</span>}
             </div>
-            {routerPlans.slice(0, 3).map((plan) => <div key={plan.id} className="mx-auto mt-3 flex max-w-4xl items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-xs"><span><strong>{plan.intent}</strong> · {plan.route.explanation} · {plan.status === 'awaiting_approval' ? '待审批' : plan.status}{plan.route.risk && plan.route.risk !== 'read' ? ` · 风险：${plan.route.risk}` : ''}</span><span className="flex shrink-0 gap-2">{plan.status === 'awaiting_approval' && <><button onClick={() => void approveRouterPlan(currentWorkspaceId, plan.id)} className="font-semibold text-emerald-600">批准</button><button onClick={() => void rejectRouterPlan(currentWorkspaceId, plan.id)} className="font-semibold text-rose-600">拒绝</button></>}{plan.status === 'planned' && <button onClick={() => void dispatchRouterPlan(currentWorkspaceId, plan.id)} className="font-semibold text-indigo-600">开始调度</button>}</span></div>)}
+            {routerPlans.slice(0, 3).map((plan) => <div key={plan.id} className="mx-auto mt-3 flex max-w-4xl items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-xs"><span><strong>{plan.intent}</strong> · {plan.route.explanation} · {plan.status === 'awaiting_approval' ? '待审批' : plan.status}{plan.route.risk && plan.route.risk !== 'read' ? ` · 风险：${plan.route.risk}` : ''}</span><span className="flex shrink-0 gap-2">{plan.status === 'awaiting_approval' && <><button onClick={() => void approveRouterPlan(currentWorkspaceId, plan.id)} className="font-semibold text-emerald-600">批准</button><button onClick={() => void rejectRouterPlan(currentWorkspaceId, plan.id)} className="font-semibold text-rose-600">拒绝</button></>}{plan.status === 'planned' && <button onClick={() => void dispatchRouterPlan(currentWorkspaceId, plan.id)} className="font-semibold text-indigo-600">开始调度</button>}{(plan.status === 'awaiting_approval' || plan.status === 'planned' || plan.status === 'running') && <button onClick={() => void cancelRouterPlan(currentWorkspaceId, plan.id)} className="font-semibold text-slate-500">取消</button>}</span></div>)}
           </div>
         )}
         <div className="flex-1 space-y-4 overflow-auto p-4 sm:p-6">
