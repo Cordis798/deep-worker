@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { getOwnedChannelAccount } from '../channel-accounts.js';
-import { listOwnedWorkspaces } from '../workspaces.js';
+import { listAccessibleWorkspaces } from '../workspace-acl.js';
 import type { ChannelInboundMessage, ChannelConnectionState } from './channel-adapter.js';
 import type { createChannelMountService } from './channel-mount-service.js';
 
@@ -54,13 +54,13 @@ export function createChannelCommandService(options: { db: Database.Database; mo
     if (command.kind === 'unknown') return { handled: true, reply: `未知命令 /${command.name}。${HELP_TEXT}` };
 
     if (command.kind === 'list') {
-      const workspaces = listOwnedWorkspaces(options.db, context.ownerUserId);
+      const workspaces = listAccessibleWorkspaces(options.db, context.ownerUserId);
       return { handled: true, reply: workspaces.length ? `可用工作区：\n${workspaces.map((workspace) => `- ${workspace.name} (${workspace.jid})`).join('\n')}` : '暂无可用工作区。' };
     }
 
     if (command.kind === 'bind') {
       if (context.message.conversation !== 'group') return { handled: true, reply: '只有群聊可以绑定工作区。' };
-      const workspace = listOwnedWorkspaces(options.db, context.ownerUserId).find((item) => item.jid === command.workspace || item.name === command.workspace);
+      const workspace = listAccessibleWorkspaces(options.db, context.ownerUserId).find((item) => item.jid === command.workspace || item.name === command.workspace);
       if (!workspace) return { handled: true, reply: '工作区不存在，请先使用 /list 查看。' };
       const result = options.mounts.bindWorkspace({ ownerUserId: context.ownerUserId, chatJid: context.message.chatJid, workspaceJid: workspace.jid, accountId: context.message.accountId });
       if (!result.ok) return { handled: true, reply: result.reason === 'exists' ? '当前群聊已经绑定其他工作区。' : '工作区绑定失败。' };

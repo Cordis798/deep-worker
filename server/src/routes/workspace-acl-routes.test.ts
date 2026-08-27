@@ -76,6 +76,17 @@ describe('workspace ACL routes', () => {
     expect(memberSession.status).toBe(201);
     const sessionId = ((await memberSession.json()) as { session: { id: string } }).session.id;
 
+    const memberMessage = await app.request(
+      `/api/workspaces/${jid}/runtime-sessions/${sessionId}/messages/stream`,
+      jsonRequest(`/api/workspaces/${jid}/runtime-sessions/${sessionId}/messages/stream`, { message: '成员可以对话' }, member.cookie),
+    );
+    expect(memberMessage.status).toBe(202);
+    const viewerMessage = await app.request(
+      `/api/workspaces/${jid}/runtime-sessions/${sessionId}/messages/stream`,
+      jsonRequest(`/api/workspaces/${jid}/runtime-sessions/${sessionId}/messages/stream`, { message: '访客不能写入' }, viewer.cookie),
+    );
+    expect(viewerMessage.status).toBe(404);
+
     const viewerSession = await app.request(
       `/api/workspaces/${jid}/runtime-sessions`,
       jsonRequest(`/api/workspaces/${jid}/runtime-sessions`, { name: 'Denied' }, viewer.cookie),
