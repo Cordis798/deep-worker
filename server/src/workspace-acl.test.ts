@@ -7,6 +7,7 @@ import {
   listWorkspaceMembers,
   listAccessibleWorkspaces,
   revokeWorkspaceMember,
+  updateWorkspaceMember,
   type WorkspaceAction,
 } from './workspace-acl.js';
 import { createWorkspace } from './workspaces.js';
@@ -112,6 +113,20 @@ describe('workspace ACL', () => {
       ok: false,
       reason: 'forbidden',
     });
+    db.close();
+  });
+
+  it('allows an administrator to change role and capability package safely', () => {
+    const db = fixture();
+    expect(updateWorkspaceMember(db, 'admin', 'ws-1', 'member', {
+      role: 'viewer',
+      jobRole: 'sales',
+      capabilityPackage: 'sales',
+    })).toEqual({ ok: true });
+    expect(getWorkspaceAccess(db, 'member', 'ws-1')?.role).toBe('viewer');
+    expect(db.prepare('SELECT job_role, capability_package FROM workspace_members WHERE workspace_jid = ? AND user_id = ?').get('ws-1', 'member')).toEqual({ job_role: 'sales', capability_package: 'sales' });
+    expect(updateWorkspaceMember(db, 'member', 'ws-1', 'viewer', { role: 'member' })).toEqual({ ok: false, reason: 'forbidden' });
+    expect(updateWorkspaceMember(db, 'admin', 'ws-1', 'admin', { role: 'viewer' })).toEqual({ ok: false, reason: 'last_admin' });
     db.close();
   });
 });

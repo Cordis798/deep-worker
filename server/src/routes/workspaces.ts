@@ -24,6 +24,7 @@ import {
   createWorkspaceSchema,
   formatZodError,
   updateRuntimeSessionSchema,
+  workspaceMemberUpdateSchema,
   updateWorkspaceSchema,
   workspaceMemberSchema,
 } from '../schemas.js';
@@ -42,6 +43,7 @@ import {
   listWorkspaceMembers,
   listAccessibleWorkspaces,
   revokeWorkspaceMember,
+  updateWorkspaceMember,
 } from '../workspace-acl.js';
 import type { Db } from '../workspaces.js';
 import type { AppVariables } from '../types.js';
@@ -134,6 +136,21 @@ export function createWorkspaceRoutes(db: Db) {
       c.req.param('jid'),
       c.req.param('userId'),
     );
+    if (!result.ok) {
+      if (result.reason === 'last_admin') return c.json({ error: '不能移除最后一名工作区管理员' }, 409);
+      return c.json({ error: 'Workspace member not found' }, 404);
+    }
+    return c.json({ success: true });
+  });
+
+  app.patch('/:jid/members/:userId', async (c) => {
+    const parsed = workspaceMemberUpdateSchema.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: formatZodError(parsed.error) }, 400);
+    const result = updateWorkspaceMember(db, c.get('user')!.id, c.req.param('jid'), c.req.param('userId'), {
+      role: parsed.data.role,
+      jobRole: parsed.data.job_role,
+      capabilityPackage: parsed.data.capability_package,
+    });
     if (!result.ok) {
       if (result.reason === 'last_admin') return c.json({ error: '不能移除最后一名工作区管理员' }, 409);
       return c.json({ error: 'Workspace member not found' }, 404);

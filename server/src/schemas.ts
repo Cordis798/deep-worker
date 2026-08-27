@@ -63,6 +63,14 @@ export const workspaceMemberSchema = z.object({
   capability_package: nonEmptyString('能力包', 80).optional(),
 });
 
+export const workspaceMemberUpdateSchema = z
+  .object({
+    role: z.enum(['workspace_admin', 'member', 'viewer']).optional(),
+    job_role: z.enum(['general', 'engineering', 'operations', 'sales']).optional(),
+    capability_package: nonEmptyString('能力包', 80).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: '至少需要提供一个可修改字段' });
+
 export const createChannelAccountSchema = z.object({
   provider: z.enum(['feishu', 'telegram', 'qq', 'dingtalk', 'wechat', 'discord', 'whatsapp']),
   name: nonEmptyString('账号名', 80),

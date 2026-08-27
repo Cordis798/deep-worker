@@ -184,3 +184,31 @@ export function revokeWorkspaceMember(
   ).run(now, now, workspaceJid, userId);
   return { ok: true };
 }
+
+export function updateWorkspaceMember(
+  db: Database.Database,
+  actorUserId: string,
+  workspaceJid: string,
+  userId: string,
+  options: { role?: WorkspaceRole; jobRole?: WorkspaceMemberRow['job_role']; capabilityPackage?: string },
+): { ok: boolean; reason?: 'forbidden' | 'not_found' | 'last_admin' } {
+  if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'manage')) return { ok: false, reason: 'forbidden' };
+  const target = db
+    .prepare('SELECT role, status FROM workspace_members WHERE workspace_jid = ? AND user_id = ?')
+    .get(workspaceJid, userId) as { role: WorkspaceRole; status: string } | undefined;
+  if (!target || target.status !== 'active') return { ok: false, reason: 'not_found' };
+  if (target.role === 'workspace_admin' && options.role && options.role !== 'workspace_admin') {
+    const count = db
+      .prepare("SELECT COUNT(*) AS count FROM workspace_members WHERE workspace_jid = ? AND role = 'workspace_admin' AND status = 'active'")
+      .get(workspaceJid) as { count: number };
+    if (count.count <= 1) return { ok: false, reason: 'last_admin' };
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE workspace_members
+     SET role = COALESCE(?, role), job_role = COALESCE(?, job_role),
+         capability_package = COALESCE(?, capability_package), updated_at = ?
+     WHERE workspace_jid = ? AND user_id = ? AND status = 'active'`,
+  ).run(options.role ?? null, options.jobRole ?? null, options.capabilityPackage ?? null, now, workspaceJid, userId);
+  return { ok: true };
+}
