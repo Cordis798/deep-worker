@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolveEffectiveCapabilities, trimCapabilityManifest, type SkillCandidate } from './capability-resolver.js';
+import { applyCapabilityGovernance, resolveCapabilitiesForWorkspace, resolveEffectiveCapabilities, trimCapabilityManifest, type SkillCandidate } from './capability-resolver.js';
+import { resolveCapabilityGovernance } from './capability-governance.js';
+import { initDatabase } from '../db/migration.js';
+import { createWorkspace } from '../workspaces.js';
 
 const skill = (candidate: Partial<SkillCandidate> & Pick<SkillCandidate, 'id' | 'name' | 'scope'>): SkillCandidate => ({
   enabled: true,
@@ -41,5 +44,42 @@ describe('生效能力解析', () => {
     expect(trimmed.mcp.selected).toHaveLength(0);
     expect(trimmed.plugins.selected).toHaveLength(0);
     expect(trimmed.hash).not.toBe(manifest.hash);
+  });
+
+  it('在能力解析后执行岗位能力包的冲突与越权检查', () => {
+    const manifest = resolveEffectiveCapabilities({
+      skills: [skill({ id: 'bash', name: 'bash', scope: 'system' })],
+      mcpServers: [{ id: 'mcp-1', name: 'git', enabled: true, transport: 'http' }],
+      plugins: [],
+    });
+    const governed = resolveCapabilityGovernance({ jobRole: 'engineering' });
+    expect(resolveEffectiveCapabilities({
+      skills: manifest.skills.selected.map((item) => skill({ id: item.id, name: item.name, scope: item.source })),
+      mcpServers: manifest.mcp.selected,
+      plugins: manifest.plugins.selected,
+    })).toBeTruthy();
+    expect(() => {
+      // 研发能力包不允许销售 CRM MCP，越权必须显式失败。
+      const salesMcp = { id: 'mcp-crm', name: 'crm', enabled: true, transport: 'http' as const };
+      applyCapabilityGovernance({ ...manifest, mcp: { selected: [salesMcp] } }, governed);
+    }).toThrowError(expect.objectContaining({ code: 'CAPABILITY_FORBIDDEN' }));
+  });
+
+  it('按工作区成员岗位解析能力并写入审计记录', () => {
+    const db = initDatabase(':memory:');
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO users (id, username, password_hash, role, status, permissions, created_at, updated_at)
+       VALUES ('owner', 'owner', 'x', 'admin', 'active', '[]', ?, ?)`,
+    ).run(now, now);
+    const workspace = createWorkspace(db, 'owner', { name: '审计工作区' })!;
+    db.prepare(
+      `UPDATE workspace_members SET job_role = 'engineering', capability_package = 'engineering'
+       WHERE workspace_jid = ? AND user_id = 'owner'`,
+    ).run(workspace.jid);
+    const manifest = resolveCapabilitiesForWorkspace(db, 'owner', workspace.jid);
+    expect(manifest.governance).toMatchObject({ jobRole: 'engineering', packageId: 'engineering' });
+    expect(db.prepare('SELECT decision FROM capability_resolution_audit WHERE workspace_jid = ?').get(workspace.jid)).toEqual({ decision: 'allowed' });
+    db.close();
   });
 });

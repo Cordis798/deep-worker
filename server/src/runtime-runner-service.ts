@@ -15,6 +15,7 @@ import { mapProviderToPiProvider, ProviderPool } from './provider-pool.js';
 import { runnerLifecycle } from './runner-lifecycle.js';
 import { checkBillingAccess } from './billing.js';
 import { recordUsageEvent } from './usage-service.js';
+import { resolveCapabilitiesForWorkspace, type CapabilityManifest } from './capabilities/capability-resolver.js';
 import {
   appendRunnerOutboxEvent,
   claimRunnerTurn,
@@ -95,6 +96,20 @@ function shouldRetryRunnerError(message: string): boolean {
     '未找到有效套餐',
     '当前账户不可用',
   ].some((marker) => message.includes(marker));
+}
+
+function toPiCapabilityInjection(manifest: CapabilityManifest): AgentRunRequest['capabilities'] {
+  return {
+    hash: manifest.hash,
+    skills: manifest.skills.selected.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      path: skill.path,
+      contentHash: skill.contentHash,
+    })),
+    mcpServers: manifest.mcp.selected,
+    plugins: manifest.plugins.selected,
+  };
 }
 
 /** 为任意智能体运行器提供可恢复的收件箱、执行回合和待发事件编排。 */
@@ -218,6 +233,9 @@ export class RuntimeRunnerService {
           if (!billingAccess.allowed) throw new Error(billingAccess.reason ?? '当前账户不可用');
         }
         usageAgentId = session.agent_profile_id;
+        const capabilities = options.capabilities ?? toPiCapabilityInjection(
+          resolveCapabilitiesForWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid),
+        );
         selectedProviderPool = this.getProviderPool(principalUserId);
         const selectedProvider = selectedProviderPool?.selectProvider(inbox.sessionId);
         selectedProviderId = selectedProvider?.id;
@@ -236,8 +254,8 @@ export class RuntimeRunnerService {
           turnId,
           queryRunId: turnId,
           identityHash: profile?.identity_hash,
-          capabilities: options.capabilities,
-          capabilityHash: options.capabilities?.hash,
+          capabilities,
+          capabilityHash: capabilities?.hash,
           provider: selectedProvider
             ? mapProviderToPiProvider(selectedProvider, getProviderCredentials(this.db, principalUserId, selectedProvider.id))
             : undefined,

@@ -19,6 +19,8 @@ export interface WorkspaceMemberRow {
   username: string;
   display_name: string;
   role: WorkspaceRole;
+  job_role: 'general' | 'engineering' | 'operations' | 'sales';
+  capability_package: string;
   status: 'active' | 'revoked';
   invited_by: string | null;
   created_at: string;
@@ -126,6 +128,7 @@ export function addWorkspaceMember(
   workspaceJid: string,
   userId: string,
   role: Exclude<WorkspaceRole, 'workspace_admin'>,
+  options: { jobRole?: WorkspaceMemberRow['job_role']; capabilityPackage?: string } = {},
 ): { ok: boolean; reason?: 'forbidden' | 'workspace_not_found' | 'user_not_found' } {
   if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'manage')) {
     return { ok: false, reason: 'forbidden' };
@@ -135,12 +138,23 @@ export function addWorkspaceMember(
   const now = new Date().toISOString();
   db.prepare(
     `INSERT INTO workspace_members (
-      workspace_jid, user_id, role, status, invited_by, created_at, updated_at, revoked_at
-    ) VALUES (?, ?, ?, 'active', ?, ?, ?, NULL)
+      workspace_jid, user_id, role, job_role, capability_package, status,
+      invited_by, created_at, updated_at, revoked_at
+    ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL)
     ON CONFLICT(workspace_jid, user_id) DO UPDATE SET
-      role = excluded.role, status = 'active', invited_by = excluded.invited_by,
-      updated_at = excluded.updated_at, revoked_at = NULL`,
-  ).run(workspaceJid, userId, role, actorUserId, now, now);
+      role = excluded.role, job_role = excluded.job_role,
+      capability_package = excluded.capability_package, status = 'active',
+      invited_by = excluded.invited_by, updated_at = excluded.updated_at, revoked_at = NULL`,
+  ).run(
+    workspaceJid,
+    userId,
+    role,
+    options.jobRole ?? 'general',
+    options.capabilityPackage ?? options.jobRole ?? 'general',
+    actorUserId,
+    now,
+    now,
+  );
   return { ok: true };
 }
 

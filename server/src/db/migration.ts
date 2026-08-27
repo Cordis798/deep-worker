@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 14;
+export const CURRENT_SCHEMA_VERSION = 15;
 
 export class MigrationError extends Error {}
 
@@ -850,6 +850,32 @@ function migrateWorkspaceMembers(db: Database.Database): void {
   ).run(now, now);
 }
 
+function migrateCapabilityGovernance(db: Database.Database): void {
+  db.exec(`
+    ALTER TABLE workspace_members ADD COLUMN job_role TEXT NOT NULL DEFAULT 'general'
+      CHECK (job_role IN ('general', 'engineering', 'operations', 'sales'));
+    ALTER TABLE workspace_members ADD COLUMN capability_package TEXT NOT NULL DEFAULT 'general';
+    CREATE TABLE IF NOT EXISTS capability_resolution_audit (
+      id TEXT PRIMARY KEY,
+      actor_user_id TEXT NOT NULL,
+      workspace_jid TEXT NOT NULL,
+      job_role TEXT NOT NULL,
+      capability_package TEXT NOT NULL,
+      decision TEXT NOT NULL CHECK (decision IN ('allowed', 'denied')),
+      manifest_hash TEXT,
+      conflicts_json TEXT NOT NULL DEFAULT '[]',
+      reason TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_capability_audit_workspace
+      ON capability_resolution_audit(workspace_jid, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_capability_audit_actor
+      ON capability_resolution_audit(actor_user_id, created_at DESC);
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
@@ -865,6 +891,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 12, name: 'billing_quota_overrides', up: createQuotaOverrideTables },
   { version: 13, name: 'runtime_context', up: migrateRuntimeContext },
   { version: 14, name: 'workspace_members', up: migrateWorkspaceMembers },
+  { version: 15, name: 'capability_governance', up: migrateCapabilityGovernance },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {

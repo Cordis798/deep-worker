@@ -99,6 +99,7 @@ export function createWorkspaceRoutes(db: Db) {
       c.req.param('jid'),
       parsed.data.user_id,
       parsed.data.role,
+      { jobRole: parsed.data.job_role, capabilityPackage: parsed.data.capability_package },
     );
     if (!result.ok) {
       if (result.reason === 'forbidden') return c.json({ error: 'Workspace not found' }, 404);
