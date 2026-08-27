@@ -13,7 +13,7 @@
 | 能力解析 | Skill 优先级、依赖、冲突、岗位 allow/deny、稳定 hash 与解析审计已落库；运行时可恢复受治理 MCP 连接配置 | `server/src/capabilities/capability-resolver.ts` |
 | Skill 注入 | 有效 Skill 会复制到隔离 Session 目录，再通过 SDK Resource Loader 加载 | `pi-runner/src/capability-injection.ts` |
 | MCP 工具桥接 | Pi Agent SDK 会话启动时发现受治理 MCP 工具，注册稳定名称的 custom tools；调用支持取消、结果截断和生命周期关闭 | `pi-runner/src/mcp-tool-bridge.ts` |
-| Agent Router | 根据任务意图、岗位标签和能力选择 Agent，持久化 Plan/Task/Event；有依赖任务按顺序执行，无依赖任务可按显式并行意图分批调度并汇总结果；高风险计划必须通过一次性审批，支持拒绝、过期和取消 | `server/src/agent-router/` |
+| Agent Router | 根据任务意图、岗位标签和能力选择 Agent，并先按成员岗位能力包裁剪候选；持久化 Plan/Task/Event；有依赖任务按顺序执行，无依赖任务可按显式并行意图分批调度并汇总结果；高风险计划必须通过一次性审批，支持拒绝、过期和取消 | `server/src/agent-router/`、`server/src/capabilities/capability-governance.ts` |
 | 并发安全 | Plan 与 Task 使用 SQLite 租约；重复 dispatch 返回冲突，旧 worker 不能覆盖新租约结果 | `server/src/agent-router/store.ts` |
 | Web/IM | Web 可创建、审批、取消和调度计划；IM 支持 `/route`、`/single`、`/approve`、`/reject`、`/cancel`，两者进入同一执行链 | `web/src/pages/ChatPage.tsx`、`server/src/im/` |
 
