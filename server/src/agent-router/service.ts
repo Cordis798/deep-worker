@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { AgentRouterResult, AgentRouterTaskResult } from '@deep-worker/shared';
 import { getAgentProfileById } from '../agent-profiles.js';
@@ -8,6 +9,8 @@ import { getWorkspaceById } from '../workspaces.js';
 import { buildAgentRouterPlan } from './planner.js';
 import {
   appendRouterEvent,
+  claimRouterPlan,
+  claimRouterTask,
   createRouterPlan,
   getRouterPlan,
   listAgentBindings,
@@ -19,6 +22,13 @@ import {
 } from './store.js';
 
 export type Db = Database.Database;
+
+export class RouterDispatchBusyError extends Error {
+  constructor() {
+    super('Router plan is already being dispatched');
+    this.name = 'RouterDispatchBusyError';
+  }
+}
 
 export class AgentRouterService {
   constructor(
@@ -43,7 +53,12 @@ export class AgentRouterService {
     const tasks = listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, input.planId);
     if (!plan || !tasks) throw new Error('Router plan not found');
     if (plan.status === 'completed') return plan.result ?? this.resultFromTasks(input, plan, []);
-    setRouterPlanStatus(this.db, plan.id, 'running');
+    const workerId = `router-worker:${crypto.randomUUID()}`;
+    if (!claimRouterPlan(this.db, plan.id, workerId)) {
+      const current = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, input.planId);
+      if (current?.status === 'completed') return current.result ?? this.resultFromTasks(input, current, []);
+      throw new RouterDispatchBusyError();
+    }
     appendRouterEvent(this.db, plan.id, null, { type: 'plan_started', planId: plan.id });
     const results: AgentRouterTaskResult[] = [];
     let failed = false;
@@ -53,7 +68,14 @@ export class AgentRouterService {
         results.push({ taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'skipped', text: null, error: '依赖任务未完成' });
         continue;
       }
-      setRouterTaskStatus(this.db, task.id, 'running');
+      if (!claimRouterTask(this.db, task.id, workerId)) {
+        const current = listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, input.planId)?.find((item) => item.id === task.id);
+        if (current?.status === 'completed') {
+          results.push({ taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'completed', text: current.resultText });
+          continue;
+        }
+        throw new RouterDispatchBusyError();
+      }
       appendRouterEvent(this.db, plan.id, task.id, { type: 'task_started', ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId });
       try {
         const session = createAccessibleRuntimeSession(this.db, input.actorUserId, input.workspaceJid, {
@@ -69,19 +91,19 @@ export class AgentRouterService {
           message: context ? `${task.spec.input}\n\n前置任务结果：\n${context}` : task.spec.input,
           idempotencyKey: `router:${plan.id}:${task.id}`,
         });
-        setRouterTaskStatus(this.db, task.id, 'completed', { text: run.reply ?? '' });
+        if (!setRouterTaskStatus(this.db, task.id, 'completed', { text: run.reply ?? '' }, workerId)) throw new RouterDispatchBusyError();
         appendRouterEvent(this.db, plan.id, task.id, { type: 'task_completed', ordinal: task.spec.ordinal, text: run.reply ?? '' });
         results.push({ taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'completed', text: run.reply ?? '' });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        setRouterTaskStatus(this.db, task.id, 'failed', { error: message });
+        setRouterTaskStatus(this.db, task.id, 'failed', { error: message }, workerId);
         appendRouterEvent(this.db, plan.id, task.id, { type: 'task_failed', ordinal: task.spec.ordinal, error: message });
         results.push({ taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'failed', text: null, error: message });
         failed = true;
       }
     }
     const result = this.resultFromTasks(input, plan, results);
-    setRouterPlanStatus(this.db, plan.id, failed ? 'failed' : 'completed', result);
+    setRouterPlanStatus(this.db, plan.id, failed ? 'failed' : 'completed', result, workerId);
     appendRouterEvent(this.db, plan.id, null, { type: failed ? 'plan_failed' : 'plan_completed', planId: plan.id });
     return result;
   }

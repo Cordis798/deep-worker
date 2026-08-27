@@ -17,7 +17,7 @@ describe('agent router routes', () => {
 
   it('creates a capability-aware plan, tracks tasks and dispatches it', async () => {
     db = initDatabase(':memory:');
-    app = createApp({ db, runner: new FakePiRunner({ response: (request) => `完成：${request.message}` }) });
+    app = createApp({ db, runner: new FakePiRunner({ delayMs: 10, response: (request) => `完成：${request.message}` }) });
     const setup = await app.request('/api/auth/setup', jsonRequest('/api/auth/setup', { username: 'owner', password: 'password123' }));
     expect(setup.status).toBe(201);
     const cookie = cookieValue(setup);
@@ -42,9 +42,13 @@ describe('agent router routes', () => {
     expect(detail.status).toBe(200);
     const detailBody = (await detail.json()) as { tasks: unknown[] };
     expect(detailBody.tasks).toHaveLength(2);
-    const dispatched = await app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
-    expect(dispatched.status).toBe(200);
-    const result = (await dispatched.json()) as { result: { status: string; tasks: Array<{ status: string }> } };
+    const [dispatched, concurrent] = await Promise.all([
+      app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } }),
+      app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } }),
+    ]);
+    expect([dispatched.status, concurrent.status].sort()).toEqual([200, 409]);
+    const resultResponse = dispatched.status === 200 ? dispatched : concurrent;
+    const result = (await resultResponse.json()) as { result: { status: string; tasks: Array<{ status: string }> } };
     expect(result.result.status).toBe('completed');
     expect(result.result.tasks).toHaveLength(2);
     expect(result.result.tasks.every((task) => task.status === 'completed')).toBe(true);

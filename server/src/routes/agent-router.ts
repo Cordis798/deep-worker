@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth.js';
 import { canWorkspaceAction } from '../workspace-acl.js';
-import { AgentRouterService } from '../agent-router/service.js';
+import { AgentRouterService, RouterDispatchBusyError } from '../agent-router/service.js';
 import {
   createAgentBinding,
   getRouterPlan,
@@ -115,7 +115,8 @@ export function createAgentRouterRoutes(db: Database.Database, router: AgentRout
       const result = await router.dispatch({ actorUserId: user.id, workspaceJid: c.req.param('jid'), planId: c.req.param('planId') });
       return c.json({ result });
     } catch (error) {
-      return c.json({ error: error instanceof Error ? error.message : String(error) }, 404);
+      const status = error instanceof RouterDispatchBusyError ? 409 : 404;
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, status);
     }
   });
 

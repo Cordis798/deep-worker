@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 16;
+export const CURRENT_SCHEMA_VERSION = 17;
 
 export class MigrationError extends Error {}
 
@@ -962,6 +962,17 @@ function migrateAgentRouter(db: Database.Database): void {
   `);
 }
 
+function migrateAgentRouterLeases(db: Database.Database): void {
+  db.exec(`
+    ALTER TABLE agent_router_plans ADD COLUMN dispatch_owner TEXT;
+    ALTER TABLE agent_router_plans ADD COLUMN dispatch_lease_expires_at TEXT;
+    CREATE INDEX IF NOT EXISTS idx_agent_router_plans_dispatch_lease
+      ON agent_router_plans(status, dispatch_lease_expires_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_router_tasks_dispatch_lease
+      ON agent_router_tasks(status, lease_expires_at);
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
@@ -979,6 +990,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 14, name: 'workspace_members', up: migrateWorkspaceMembers },
   { version: 15, name: 'capability_governance', up: migrateCapabilityGovernance },
   { version: 16, name: 'agent_router', up: migrateAgentRouter },
+  { version: 17, name: 'agent_router_leases', up: migrateAgentRouterLeases },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {
