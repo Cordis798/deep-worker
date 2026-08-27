@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cookieValue, cookieRequest, jsonRequest, makeApp } from '../helpers/test-app.js';
+import { upsertPlugin } from '../capabilities/plugin-catalog.js';
 
 async function setup(app: ReturnType<typeof makeApp>['app']): Promise<string> {
   const response = await app.request('/api/auth/setup', jsonRequest('/api/auth/setup', { username: 'admin', password: 'password123' }));
@@ -41,5 +42,19 @@ describe('能力治理 API', () => {
     const body = (await list.json()) as { mcp_servers: Array<Record<string, unknown>> };
     expect(JSON.stringify(body)).not.toContain('secret');
     expect(body.mcp_servers[0]).not.toHaveProperty('config_encrypted');
+  });
+
+  it('阻止普通成员修改全局 Plugin，系统管理员可以修改', async () => {
+    const { app, db } = makeApp();
+    const adminCookie = await setup(app);
+    const memberResponse = await app.request('/api/auth/register', jsonRequest('/api/auth/register', { username: 'member', password: 'password123' }));
+    expect(memberResponse.status).toBe(201);
+    const memberCookie = cookieValue(memberResponse);
+    const plugin = upsertPlugin(db, { ownerUserId: null, name: 'global-demo', version: '1.0.0', source: 'system', manifest: {} });
+
+    let response = await app.request(`/api/capabilities/plugins/${plugin.id}`, jsonRequest('', { enabled: true }, memberCookie, 'PATCH'));
+    expect(response.status).toBe(403);
+    response = await app.request(`/api/capabilities/plugins/${plugin.id}`, jsonRequest('', { enabled: true }, adminCookie, 'PATCH'));
+    expect(response.status).toBe(200);
   });
 });

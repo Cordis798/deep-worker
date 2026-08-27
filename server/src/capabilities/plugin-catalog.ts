@@ -39,6 +39,24 @@ export function listPlugins(db: Database.Database, ownerUserId: string): PluginR
   return rows.map(toPlugin);
 }
 
-export function setPluginEnabled(db: Database.Database, ownerUserId: string, id: string, enabled: boolean): boolean {
-  return db.prepare('UPDATE plugins_catalog SET enabled = ?, updated_at = ? WHERE id = ? AND (owner_user_id IS NULL OR owner_user_id = ?)').run(enabled ? 1 : 0, new Date().toISOString(), id, ownerUserId).changes === 1;
+export function setPluginEnabled(
+  db: Database.Database,
+  ownerUserId: string,
+  id: string,
+  enabled: boolean,
+  canManageGlobal = false,
+): boolean {
+  return db
+    .prepare(
+      `UPDATE plugins_catalog SET enabled = ?, updated_at = ?
+       WHERE id = ?
+         AND (owner_user_id = ? OR (owner_user_id IS NULL AND ? = 1))`,
+    )
+    .run(
+      enabled ? 1 : 0,
+      new Date().toISOString(),
+      id,
+      ownerUserId,
+      canManageGlobal ? 1 : 0,
+    ).changes === 1;
 }

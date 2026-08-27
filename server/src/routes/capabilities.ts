@@ -9,6 +9,7 @@ import { resolveCapabilitiesFromDatabase, trimCapabilityManifest } from '../capa
 import { appendAgentBuilderTurn, createAgentBuilderDraft, getAgentBuilderDraft, prepareAgentBuilderDraft, publishAgentBuilderDraft, saveAgentBuilderDefinition, toPublicAgentBuilderDraft } from '../capabilities/agent-builder-service.js';
 import type { AppVariables } from '../types.js';
 import { canWorkspaceAction } from '../workspace-acl.js';
+import { hasPermission } from '../permissions.js';
 
 const skillImportSchema = z.object({
   source_type: z.enum(['git', 'https', 'zip']),
@@ -124,9 +125,14 @@ export function createCapabilityRoutes(db: Db) {
   });
 
   app.patch('/plugins/:id', async (c) => {
+    const user = c.get('user')!;
     const body = await c.req.json().catch(() => ({}));
     if (typeof body.enabled !== 'boolean') return c.json({ error: 'enabled 必须是布尔值' }, 400);
-    if (!setPluginEnabled(db, c.get('user')!.id, c.req.param('id'), body.enabled)) return c.json({ error: 'Plugin not found' }, 404);
+    const plugin = listPlugins(db, user.id).find((item) => item.id === c.req.param('id'));
+    if (plugin?.owner_user_id === null && !hasPermission(user, 'manage_system_config')) {
+      return c.json({ error: '只有系统管理员可以修改全局 Plugin' }, 403);
+    }
+    if (!setPluginEnabled(db, user.id, c.req.param('id'), body.enabled, hasPermission(user, 'manage_system_config'))) return c.json({ error: 'Plugin not found' }, 404);
     return c.json({ success: true });
   });
 

@@ -34,4 +34,14 @@ describe('MCP 与 Plugins 目录', () => {
     expect(setPluginEnabled(db, 'user-1', plugin.id, true)).toBe(true);
     expect(listPlugins(db, 'user-1')[0].enabled).toBe(true);
   });
+
+  it('只允许具备系统配置权限的用户切换全局 Plugin', () => {
+    db = initDatabase(':memory:');
+    user(db);
+    const plugin = upsertPlugin(db, { ownerUserId: null, name: 'builtin', version: '1.0.0', source: 'system', manifest: {} });
+    expect(setPluginEnabled(db, 'user-1', plugin.id, true)).toBe(false);
+    expect(listPlugins(db, 'user-1')[0].enabled).toBe(false);
+    expect(setPluginEnabled(db, 'user-1', plugin.id, true, true)).toBe(true);
+    expect(listPlugins(db, 'user-1')[0].enabled).toBe(true);
+  });
 });
