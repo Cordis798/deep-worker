@@ -446,8 +446,15 @@ export function releaseRouterPlan(db: Db, planId: string, workerId: string): boo
 
 export function setRouterTaskStatus(db: Db, taskId: string, status: AgentRouterTaskStatus, result?: { text?: string; error?: string }, workerId?: string): boolean {
   const now = new Date().toISOString();
-  const where = workerId ? 'WHERE id = ? AND lease_owner = ? AND lease_expires_at > ?' : 'WHERE id = ?';
-  const params = [status, status, result ? JSON.stringify(result) : null, result?.error ?? null, status, status, now, status, now, taskId, ...(workerId ? [workerId, now] : [])];
+  const where = workerId
+    ? `WHERE id = ? AND lease_owner = ? AND lease_expires_at > ?
+       AND EXISTS (
+         SELECT 1 FROM agent_router_plans p
+         WHERE p.id = agent_router_tasks.plan_id AND p.status = 'running'
+           AND p.dispatch_owner = ? AND p.dispatch_lease_expires_at > ?
+       )`
+    : 'WHERE id = ?';
+  const params = [status, status, result ? JSON.stringify(result) : null, result?.error ?? null, status, status, now, status, now, taskId, ...(workerId ? [workerId, now, workerId, now] : [])];
   return db.prepare(`UPDATE agent_router_tasks SET status = ?, attempt = attempt + CASE WHEN ? = 'running' THEN 1 ELSE 0 END, result_json = COALESCE(?, result_json), error = ?, lease_owner = CASE WHEN ? IN ('completed', 'failed', 'skipped') THEN NULL ELSE lease_owner END, lease_expires_at = CASE WHEN ? IN ('completed', 'failed', 'skipped') THEN NULL ELSE lease_expires_at END, updated_at = ?, completed_at = CASE WHEN ? IN ('completed', 'failed', 'skipped') THEN ? ELSE completed_at END ${where}`)
     .run(...params).changes === 1;
 }
