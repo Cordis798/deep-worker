@@ -90,6 +90,33 @@ describe('PiRunner', () => {
     await runner.close();
   });
 
+  it('does not expose bash to read-only requests', async () => {
+    const session: RuntimeSession = {
+      sessionId: 'read-session',
+      isStreaming: false,
+      subscribe: () => () => undefined,
+      prompt: async () => ({ text: 'read', sessionId: 'read-session', finalizationReason: 'completed' as const }),
+      steer: async () => { throw new Error('not used'); },
+      followUp: async () => { throw new Error('not used'); },
+      abort: async () => undefined,
+      compact: async () => undefined,
+      dispose: () => undefined,
+    };
+    let allowedTools: string[] | undefined;
+    const runtime: AgentRuntime = {
+      kind: 'pi',
+      createSession: async (options) => {
+        allowedTools = options.allowedTools;
+        return session;
+      },
+      close: async () => undefined,
+    };
+    const runner = new PiRunner({ baseDir: 'C:\\tmp\\read-only-runner-test', runtime });
+    await runner.run({ sessionId: 'read-session', message: '查看状态', toolPolicy: 'read' });
+    expect(allowedTools).toEqual([]);
+    await runner.close();
+  });
+
   it('assembles prompts, maps events and returns the final reply', async () => {
     const client = new FakeClient();
     const manager = new PiSessionManager({

@@ -76,4 +76,33 @@ describe('PiSdkRuntimeAdapter', () => {
       }),
     );
   });
+
+  it('passes an empty built-in tool allowlist to read-only sessions', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'deep-worker-sdk-read-'));
+    roots.push(root);
+    const createAgentSession = vi.fn(async () => ({ session: fakeAgentSession() }));
+    const dependencies: PiSdkRuntimeDependencies = {
+      createModelRuntime: vi.fn(async () => ({
+        getModel: () => ({ provider: 'anthropic', id: 'model-a' }),
+        registerProvider: vi.fn(),
+        setRuntimeApiKey: vi.fn(async () => undefined),
+      })),
+      createSettingsManager: vi.fn(() => ({ setRetryEnabled: vi.fn() })),
+      createResourceLoader: vi.fn(() => ({ reload: vi.fn(async () => undefined) })),
+      createSessionManager: vi.fn(() => ({ kind: 'new-session' })),
+      openSessionManager: vi.fn(() => ({ kind: 'restored-session' })),
+      createAgentSession,
+    };
+
+    const runtime = new PiSdkRuntimeAdapter({ dependencies });
+    await runtime.createSession({
+      sessionId: 'read-session',
+      cwd: path.join(root, 'workspace'),
+      sessionDir: path.join(root, 'sessions'),
+      allowedTools: [],
+    });
+
+    expect(createAgentSession).toHaveBeenCalledWith(expect.objectContaining({ tools: [] }));
+    await runtime.close();
+  });
 });

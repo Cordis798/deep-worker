@@ -110,7 +110,7 @@ describe('容器运行器', () => {
     fs.mkdirSync(session);
     let clientClosed = false;
     let clientOptions:
-      { command?: string; commandPrefixArgs?: string[]; env?: NodeJS.ProcessEnv; runtimeOptions?: { provider?: { env?: NodeJS.ProcessEnv } } } | undefined;
+      { command?: string; commandPrefixArgs?: string[]; env?: NodeJS.ProcessEnv; runtimeOptions?: { provider?: { env?: NodeJS.ProcessEnv }; allowedTools?: string[] } } | undefined;
     const listeners = new Set<(event: any) => void>();
     const client: ContainerWorkerClient = {
       sessionId: 'container-session',
@@ -188,6 +188,36 @@ describe('容器运行器', () => {
       expect(clientOptions?.runtimeOptions?.provider?.env).toBeUndefined();
       await runner.close();
       expect(clientClosed).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not expose bash to read-only container sessions', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-container-read-'));
+    const workspace = path.join(root, 'workspace');
+    const session = path.join(root, 'session');
+    fs.mkdirSync(workspace);
+    fs.mkdirSync(session);
+    let clientOptions: { runtimeOptions?: { allowedTools?: string[] } } | undefined;
+    const client: ContainerWorkerClient = {
+      sessionId: 'container-read-session',
+      isStreaming: false,
+      start: async () => undefined,
+      close: async () => undefined,
+      subscribe: () => () => undefined,
+      prompt: async () => ({ text: '只读', sessionId: 'container-read-session', finalizationReason: 'completed' as const }),
+      steer: async () => { throw new Error('not used'); },
+      followUp: async () => { throw new Error('not used'); },
+      abort: async () => undefined,
+      compact: async () => undefined,
+      dispose: () => undefined,
+    };
+    try {
+      const runner = new ContainerRunner({ spawnClient: (options) => { clientOptions = options; return client; } });
+      await runner.run({ sessionId: 'container-read-session', message: '查看状态', cwd: workspace, sessionDir: session, toolPolicy: 'read' });
+      expect(clientOptions?.runtimeOptions?.allowedTools).toEqual([]);
+      await runner.close();
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

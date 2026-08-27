@@ -45,6 +45,7 @@ export interface ContainerWorkerClient extends RuntimeSession {
 interface ManagedContainerSession {
   client: ContainerWorkerClient;
   providerHash?: string;
+  toolPolicy: 'read' | 'write';
   lastUsedAt: number;
 }
 
@@ -238,8 +239,9 @@ export class ContainerRunner implements AgentRunner {
 
   private async getOrCreate(request: AgentRunRequest): Promise<ManagedContainerSession> {
     const providerHash = request.provider?.hash;
+    const toolPolicy = request.toolPolicy ?? 'write';
     const existing = this.sessions.get(request.sessionId);
-    if (existing && existing.providerHash === providerHash) {
+    if (existing && existing.providerHash === providerHash && existing.toolPolicy === toolPolicy) {
       existing.lastUsedAt = Date.now();
       return existing;
     }
@@ -291,13 +293,13 @@ export class ContainerRunner implements AgentRunner {
           ? { ...request.provider, env: undefined }
           : undefined,
         capabilities: request.capabilities,
-        allowedTools: ['bash'],
+        allowedTools: toolPolicy === 'read' ? [] : ['bash'],
       },
       requestTimeoutMs: 30_000,
       startupTimeoutMs: 30_000,
     });
     await client.start();
-    const managed = { client, providerHash, lastUsedAt: Date.now() };
+    const managed = { client, providerHash, toolPolicy, lastUsedAt: Date.now() };
     this.sessions.set(request.sessionId, managed);
     return managed;
   }

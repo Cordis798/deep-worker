@@ -28,6 +28,7 @@ export interface AgentRunRequest {
   queryRunId?: string;
   timeoutMs?: number;
   capabilities?: PiCapabilityInjection;
+  toolPolicy?: 'read' | 'write';
   provider?: PiProviderSelection;
   containerMounts?: Array<{ hostPath: string; containerPath: string; readonly: boolean }>;
   containerLimits?: { memoryMb?: number; cpus?: number; pids?: number; tmpfsMb?: number };
@@ -136,7 +137,7 @@ export class PiRunner implements AgentRunner {
           systemPrompt: request.systemPrompt,
           provider: request.provider,
           capabilities: request.capabilities,
-          allowedTools: ['bash'],
+          allowedTools: request.toolPolicy === 'read' ? [] : ['bash'],
         },
         async (session) => {
           const unsubscribe = session.subscribe((runtimeEvent) => {

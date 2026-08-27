@@ -297,6 +297,7 @@ export class RuntimeRunnerService {
           identityHash: profile?.identity_hash,
           capabilities,
           capabilityHash: capabilities?.hash,
+          toolPolicy: options.toolPolicy,
           abortSignal: executionAbortController.signal,
           provider: selectedProvider
             ? mapProviderToPiProvider(selectedProvider, getProviderCredentials(this.db, principalUserId, selectedProvider.id))
