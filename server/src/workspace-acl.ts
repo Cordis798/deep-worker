@@ -153,9 +153,9 @@ export function addWorkspaceMember(
     const jobRole = normalizeJobRole(options.jobRole);
     const packageId = options.capabilityPackage ?? jobRole;
     if (!validCapabilityPackage(packageId, jobRole)) return { ok: false as const, reason: 'invalid_package' as const };
+    if (workspace.owner_user_id === userId && role !== 'workspace_admin') return { ok: false as const, reason: 'owner_protected' as const };
     const current = db.prepare('SELECT role, status FROM workspace_members WHERE workspace_jid = ? AND user_id = ?').get(workspaceJid, userId) as { role: WorkspaceRole; status: string } | undefined;
     if (current?.status === 'active' && current.role === 'workspace_admin' && role !== 'workspace_admin') {
-      if (workspace.owner_user_id === userId) return { ok: false as const, reason: 'owner_protected' as const };
       const count = db.prepare("SELECT COUNT(*) AS count FROM workspace_members WHERE workspace_jid = ? AND role = 'workspace_admin' AND status = 'active'").get(workspaceJid) as { count: number };
       if (count.count <= 1) return { ok: false as const, reason: 'last_admin' as const };
     }
