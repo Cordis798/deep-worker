@@ -9,7 +9,7 @@ import type {
   AgentRouterTaskSpec,
   AgentRouterTaskStatus,
 } from '@deep-worker/shared';
-import { canWorkspaceAction } from '../workspace-acl.js';
+import { canWorkspaceAction, getWorkspaceAccess } from '../workspace-acl.js';
 
 export type Db = Database.Database;
 
@@ -118,6 +118,17 @@ export function createAgentBinding(
   if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'manage')) return { ok: false, reason: 'forbidden' };
   const profile = db.prepare('SELECT id, name, status FROM agent_profiles WHERE id = ?').get(input.agentProfileId) as { id: string; name: string; status: string } | undefined;
   if (!profile || profile.status !== 'active') return { ok: false, reason: 'profile_not_found' };
+  const access = getWorkspaceAccess(db, actorUserId, workspaceJid);
+  const allowedProfile = db.prepare(
+    `SELECT 1 FROM agent_profiles p
+     WHERE p.id = ? AND (
+       p.owner_user_id = ? OR p.owner_user_id = ? OR EXISTS (
+         SELECT 1 FROM workspaces w JOIN workspace_members m ON m.workspace_jid = w.jid
+         WHERE w.agent_profile_id = p.id AND w.jid = ? AND m.user_id = ? AND m.status = 'active'
+       )
+     )`,
+  ).get(input.agentProfileId, actorUserId, access?.workspaceOwnerUserId ?? '', workspaceJid, actorUserId);
+  if (!allowedProfile) return { ok: false, reason: 'profile_not_found' };
   const id = `wab_${crypto.randomUUID()}`;
   const now = new Date().toISOString();
   try {

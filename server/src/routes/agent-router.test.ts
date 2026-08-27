@@ -23,25 +23,30 @@ describe('agent router routes', () => {
     const cookie = cookieValue(setup);
     const profileResponse = await app.request('/api/agent-profiles', jsonRequest('/api/agent-profiles', { name: '研发 Agent' }, cookie));
     const profile = (await profileResponse.json()) as { agent_profile: { id: string } };
+    const operationsProfileResponse = await app.request('/api/agent-profiles', jsonRequest('/api/agent-profiles', { name: '运维 Agent' }, cookie));
+    const operationsProfile = (await operationsProfileResponse.json()) as { agent_profile: { id: string } };
     const workspaceResponse = await app.request('/api/workspaces', jsonRequest('/api/workspaces', { name: '编排工作区', agent_profile_id: profile.agent_profile.id }, cookie));
     const workspace = (await workspaceResponse.json()) as { workspace: { jid: string } };
     const jid = workspace.workspace.jid;
-    const binding = await app.request(`/api/workspaces/${jid}/agents`, jsonRequest(`/api/workspaces/${jid}/agents`, { agent_profile_id: profile.agent_profile.id, capabilities: ['code', 'deploy'], role_tags: ['engineering'], priority: 10 }, cookie));
+    const binding = await app.request(`/api/workspaces/${jid}/agents`, jsonRequest(`/api/workspaces/${jid}/agents`, { agent_profile_id: profile.agent_profile.id, capabilities: ['code'], role_tags: ['engineering'], priority: 10 }, cookie));
     expect(binding.status).toBe(201);
+    const operationsBinding = await app.request(`/api/workspaces/${jid}/agents`, jsonRequest(`/api/workspaces/${jid}/agents`, { agent_profile_id: operationsProfile.agent_profile.id, capabilities: ['deploy'], role_tags: ['operations'], priority: 10 }, cookie));
+    expect(operationsBinding.status).toBe(201);
 
     const planned = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '请修复代码并发布上线' }, cookie));
     expect(planned.status).toBe(201);
     const plan = (await planned.json()) as { plan: { id: string; route: { tasks: unknown[] } } };
-    expect(plan.plan.route.tasks).toHaveLength(1);
+    expect(plan.plan.route.tasks).toHaveLength(2);
 
     const detail = await app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}`, { headers: { cookie: `dw_session=${cookie}` } });
     expect(detail.status).toBe(200);
     const detailBody = (await detail.json()) as { tasks: unknown[] };
-    expect(detailBody.tasks).toHaveLength(1);
+    expect(detailBody.tasks).toHaveLength(2);
     const dispatched = await app.request(`/api/workspaces/${jid}/router/plans/${plan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
     expect(dispatched.status).toBe(200);
     const result = (await dispatched.json()) as { result: { status: string; tasks: Array<{ status: string }> } };
     expect(result.result.status).toBe('completed');
-    expect(result.result.tasks[0].status).toBe('completed');
+    expect(result.result.tasks).toHaveLength(2);
+    expect(result.result.tasks.every((task) => task.status === 'completed')).toBe(true);
   });
 });
