@@ -33,7 +33,7 @@ export async function resolvePiSdkModel(
 ): Promise<unknown> {
   const config = selection.modelConfig;
   const keyName = config?.apiKeyEnv ?? providerEnvName(selection.provider);
-  const apiKey = selection.env?.[keyName];
+  const apiKey = selection.env?.[keyName] ?? process.env[keyName];
 
   if (config) {
     runtime.registerProvider(selection.provider, {
