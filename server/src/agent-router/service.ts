@@ -15,6 +15,8 @@ import {
   claimRouterPlan,
   claimRouterTask,
   createRouterPlan,
+  failRouterPlanForWorker,
+  failRouterTasksForWorker,
   getRouterPlan,
   listAgentBindings,
   listRouterTaskRows,
@@ -207,7 +209,10 @@ export class AgentRouterService {
             if (current?.status !== 'cancelled') throw new RouterDispatchBusyError();
             return this.resultFromTasks(input, current, results);
           }
-          if (!setRouterTaskStatus(this.db, task.id, 'completed', { text: run.reply ?? '' }, workerId)) throw new RouterDispatchBusyError();
+          if (!setRouterTaskStatus(this.db, task.id, 'completed', { text: run.reply ?? '' }, workerId)) {
+            failRouterTasksForWorker(this.db, plan.id, workerId, '任务写回时租约已失效');
+            throw new RouterDispatchBusyError();
+          }
           appendRouterEvent(this.db, plan.id, task.id, { type: 'task_completed', ordinal: task.spec.ordinal, text: run.reply ?? '' });
           results.push({ taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'completed', text: run.reply ?? '' });
         } catch (error) {
@@ -216,7 +221,14 @@ export class AgentRouterService {
           if (abortController.signal.aborted || getRouterPlan(this.db, input.actorUserId, input.workspaceJid, plan.id)?.status === 'cancelled') {
             return this.resultFromTasks(input, getRouterPlan(this.db, input.actorUserId, input.workspaceJid, plan.id) ?? plan, results);
           }
-          if (leaseLost || !setRouterTaskStatus(this.db, task.id, 'failed', { error: message }, workerId)) throw new RouterDispatchBusyError();
+          if (leaseLost) {
+            failRouterTasksForWorker(this.db, plan.id, workerId, '任务租约失效，执行结果不再可信');
+            throw new RouterDispatchBusyError();
+          }
+          if (!setRouterTaskStatus(this.db, task.id, 'failed', { error: message }, workerId)) {
+            failRouterTasksForWorker(this.db, plan.id, workerId, '任务写回时租约已失效');
+            throw new RouterDispatchBusyError();
+          }
           appendRouterEvent(this.db, plan.id, task.id, { type: 'task_failed', ordinal: task.spec.ordinal, error: message });
           results.push({ taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'failed', text: null, error: message });
           failed = true;
@@ -229,6 +241,9 @@ export class AgentRouterService {
       if (!setRouterPlanStatus(this.db, plan.id, failed ? 'failed' : 'completed', result, workerId)) throw new RouterDispatchBusyError();
       appendRouterEvent(this.db, plan.id, null, { type: failed ? 'plan_failed' : 'plan_completed', planId: plan.id });
       return result;
+    } catch (error) {
+      this.failDispatchAfterError(input, plan, workerId, error);
+      throw error;
     } finally {
       this.clearActiveDispatch(plan.id, abortController);
     }
@@ -320,7 +335,10 @@ export class AgentRouterService {
         if (currentPlan?.status !== 'cancelled') throw new RouterDispatchBusyError();
         return this.taskResult(listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, input.planId)?.find((row) => row.id === task.id) ?? task);
       }
-      if (!setRouterTaskStatus(this.db, task.id, 'completed', { text: run.reply ?? '' }, workerId)) throw new RouterDispatchBusyError();
+      if (!setRouterTaskStatus(this.db, task.id, 'completed', { text: run.reply ?? '' }, workerId)) {
+        failRouterTasksForWorker(this.db, input.planId, workerId, '任务写回时租约已失效');
+        throw new RouterDispatchBusyError();
+      }
       appendRouterEvent(this.db, input.planId, task.id, { type: 'task_completed', ordinal: task.spec.ordinal, text: run.reply ?? '', parallel: true });
       return { taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'completed', text: run.reply ?? '' };
     } catch (error) {
@@ -331,7 +349,14 @@ export class AgentRouterService {
         const current = listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, input.planId)?.find((row) => row.id === task.id);
         return this.taskResult(current ?? task);
       }
-      if (leaseLost || !setRouterTaskStatus(this.db, task.id, 'failed', { error: message }, workerId)) throw new RouterDispatchBusyError();
+      if (leaseLost) {
+        failRouterTasksForWorker(this.db, input.planId, workerId, '任务租约失效，执行结果不再可信');
+        throw new RouterDispatchBusyError();
+      }
+      if (!setRouterTaskStatus(this.db, task.id, 'failed', { error: message }, workerId)) {
+        failRouterTasksForWorker(this.db, input.planId, workerId, '任务写回时租约已失效');
+        throw new RouterDispatchBusyError();
+      }
       appendRouterEvent(this.db, input.planId, task.id, { type: 'task_failed', ordinal: task.spec.ordinal, error: message, parallel: true });
       return { taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'failed', text: null, error: message };
     } finally {
@@ -423,14 +448,15 @@ export class AgentRouterService {
   ): void {
     const current = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, plan.id);
     if (!current || current.status !== 'running') return;
-    const rows = listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, plan.id) ?? [];
     const message = error instanceof Error ? error.message : String(error);
+    failRouterTasksForWorker(this.db, plan.id, workerId, message);
+    const rows = listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, plan.id) ?? [];
     const result: AgentRouterResult = {
       ...this.resultFromTasks(input, current, rows.map((task) => this.taskResult(task))),
       status: 'failed',
       text: message,
     };
-    if (setRouterPlanStatus(this.db, plan.id, 'failed', result, workerId)) {
+    if (setRouterPlanStatus(this.db, plan.id, 'failed', result, workerId) || failRouterPlanForWorker(this.db, plan.id, workerId, result)) {
       appendRouterEvent(this.db, plan.id, null, { type: 'plan_failed', planId: plan.id, error: message });
     }
   }

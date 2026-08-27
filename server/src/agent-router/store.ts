@@ -482,6 +482,32 @@ export function claimRouterTask(db: Db, taskId: string, workerId: string, leaseM
   ).run(workerId, expiresAt, nowIso, taskId, workerId, nowIso, nowIso, workerId).changes === 1;
 }
 
+/** 在租约失效或执行异常后，只清理仍归当前 Worker 所有的运行中任务。 */
+export function failRouterTasksForWorker(db: Db, planId: string, workerId: string, error: string): number {
+  const now = new Date().toISOString();
+  return db.prepare(
+    `UPDATE agent_router_tasks
+     SET status = 'failed', error = ?, lease_owner = NULL, lease_expires_at = NULL,
+         updated_at = ?, completed_at = ?
+     WHERE plan_id = ? AND status = 'running' AND lease_owner = ?
+       AND EXISTS (
+         SELECT 1 FROM agent_router_plans p
+         WHERE p.id = agent_router_tasks.plan_id AND p.status = 'running' AND p.dispatch_owner = ?
+       )`,
+  ).run(error, now, now, planId, workerId, workerId).changes;
+}
+
+/** 以 dispatch_owner 作为最后一道 fencing，收口当前 Worker 的失败计划。 */
+export function failRouterPlanForWorker(db: Db, planId: string, workerId: string, result?: AgentRouterResult): boolean {
+  const now = new Date().toISOString();
+  return db.prepare(
+    `UPDATE agent_router_plans
+     SET status = 'failed', result_json = COALESCE(?, result_json), dispatch_owner = NULL,
+         dispatch_lease_expires_at = NULL, updated_at = ?, completed_at = ?
+     WHERE id = ? AND status = 'running' AND dispatch_owner = ?`,
+  ).run(result ? JSON.stringify(result) : null, now, now, planId, workerId).changes === 1;
+}
+
 export function renewRouterTask(db: Db, taskId: string, workerId: string, leaseMs = DEFAULT_ROUTER_LEASE_MS): boolean {
   const now = new Date();
   return db.prepare(
