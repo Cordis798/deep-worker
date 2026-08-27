@@ -47,7 +47,7 @@ export interface AgentRouterTaskRow {
   error: string | null;
 }
 
-const DEFAULT_LEASE_MS = 5 * 60 * 1000;
+export const DEFAULT_ROUTER_LEASE_MS = 5 * 60 * 1000;
 
 interface PlanDbRow {
   id: string;
@@ -239,15 +239,15 @@ export function listRouterTaskRows(db: Db, actorUserId: string, workspaceJid: st
   }));
 }
 
-export function setRouterPlanStatus(db: Db, planId: string, status: AgentRouterPlanStatus, result?: AgentRouterResult, workerId?: string): void {
+export function setRouterPlanStatus(db: Db, planId: string, status: AgentRouterPlanStatus, result?: AgentRouterResult, workerId?: string): boolean {
   const now = new Date().toISOString();
   const where = workerId ? 'WHERE id = ? AND dispatch_owner = ?' : 'WHERE id = ?';
   const params = [status, result ? JSON.stringify(result) : null, now, status, status, status, now, planId, ...(workerId ? [workerId] : [])];
-  db.prepare(`UPDATE agent_router_plans SET status = ?, result_json = COALESCE(?, result_json), updated_at = ?, dispatch_owner = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN NULL ELSE dispatch_owner END, dispatch_lease_expires_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN NULL ELSE dispatch_lease_expires_at END, completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN ? ELSE completed_at END ${where}`)
-    .run(...params);
+  return db.prepare(`UPDATE agent_router_plans SET status = ?, result_json = COALESCE(?, result_json), updated_at = ?, dispatch_owner = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN NULL ELSE dispatch_owner END, dispatch_lease_expires_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN NULL ELSE dispatch_lease_expires_at END, completed_at = CASE WHEN ? IN ('completed', 'failed', 'cancelled') THEN ? ELSE completed_at END ${where}`)
+    .run(...params).changes === 1;
 }
 
-export function claimRouterPlan(db: Db, planId: string, workerId: string, leaseMs = DEFAULT_LEASE_MS): boolean {
+export function claimRouterPlan(db: Db, planId: string, workerId: string, leaseMs = DEFAULT_ROUTER_LEASE_MS): boolean {
   const now = new Date();
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + leaseMs).toISOString();
@@ -261,6 +261,15 @@ export function claimRouterPlan(db: Db, planId: string, workerId: string, leaseM
        ))
      )`,
   ).run(workerId, expiresAt, nowIso, planId, nowIso, workerId).changes === 1;
+}
+
+export function renewRouterPlan(db: Db, planId: string, workerId: string, leaseMs = DEFAULT_ROUTER_LEASE_MS): boolean {
+  const now = new Date();
+  return db.prepare(
+    `UPDATE agent_router_plans
+     SET dispatch_lease_expires_at = ?, updated_at = ?
+     WHERE id = ? AND status = 'running' AND dispatch_owner = ? AND dispatch_lease_expires_at > ?`,
+  ).run(new Date(now.getTime() + leaseMs).toISOString(), now.toISOString(), planId, workerId, now.toISOString()).changes === 1;
 }
 
 export function releaseRouterPlan(db: Db, planId: string, workerId: string): boolean {
@@ -279,7 +288,7 @@ export function setRouterTaskStatus(db: Db, taskId: string, status: AgentRouterT
     .run(...params).changes === 1;
 }
 
-export function claimRouterTask(db: Db, taskId: string, workerId: string, leaseMs = DEFAULT_LEASE_MS): boolean {
+export function claimRouterTask(db: Db, taskId: string, workerId: string, leaseMs = DEFAULT_ROUTER_LEASE_MS): boolean {
   const now = new Date();
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + leaseMs).toISOString();
@@ -290,6 +299,28 @@ export function claimRouterTask(db: Db, taskId: string, workerId: string, leaseM
        lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ? OR lease_owner = ?
      )`,
   ).run(workerId, expiresAt, nowIso, taskId, nowIso, workerId).changes === 1;
+}
+
+export function renewRouterTask(db: Db, taskId: string, workerId: string, leaseMs = DEFAULT_ROUTER_LEASE_MS): boolean {
+  const now = new Date();
+  return db.prepare(
+    `UPDATE agent_router_tasks
+     SET lease_expires_at = ?, updated_at = ?
+     WHERE id = ? AND status = 'running' AND lease_owner = ? AND lease_expires_at > ?`,
+  ).run(new Date(now.getTime() + leaseMs).toISOString(), now.toISOString(), taskId, workerId, now.toISOString()).changes === 1;
+}
+
+export function skipRouterTask(db: Db, taskId: string, workerId: string, error: string): boolean {
+  const now = new Date().toISOString();
+  return db.prepare(
+    `UPDATE agent_router_tasks
+     SET status = 'skipped', error = ?, updated_at = ?, completed_at = ?
+     WHERE id = ? AND status = 'queued'
+       AND EXISTS (
+         SELECT 1 FROM agent_router_plans p
+         WHERE p.id = agent_router_tasks.plan_id AND p.status = 'running' AND p.dispatch_owner = ?
+       )`,
+  ).run(error, now, now, taskId, workerId).changes === 1;
 }
 
 export function appendRouterEvent(db: Db, planId: string, taskId: string | null, event: unknown): void {

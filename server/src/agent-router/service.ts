@@ -17,6 +17,9 @@ import {
   listRouterTaskRows,
   setRouterPlanStatus,
   setRouterTaskStatus,
+  renewRouterPlan,
+  renewRouterTask,
+  skipRouterTask,
   type AgentBindingRow,
   type AgentRouterPlanRow,
 } from './store.js';
@@ -63,8 +66,14 @@ export class AgentRouterService {
     const results: AgentRouterTaskResult[] = [];
     let failed = false;
     for (const task of tasks) {
+      if (task.status === 'completed' || task.status === 'failed' || task.status === 'skipped') {
+        const status = task.status;
+        results.push({ taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status, text: task.resultText, ...(task.error ? { error: task.error } : {}) });
+        if (status === 'failed') failed = true;
+        continue;
+      }
       if (failed || task.spec.dependsOn.some((ordinal) => results.find((result) => result.ordinal === ordinal)?.status !== 'completed')) {
-        setRouterTaskStatus(this.db, task.id, 'skipped', { error: '依赖任务未完成' });
+        if (!skipRouterTask(this.db, task.id, workerId, '依赖任务未完成')) throw new RouterDispatchBusyError();
         results.push({ taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'skipped', text: null, error: '依赖任务未完成' });
         continue;
       }
@@ -77,6 +86,10 @@ export class AgentRouterService {
         throw new RouterDispatchBusyError();
       }
       appendRouterEvent(this.db, plan.id, task.id, { type: 'task_started', ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId });
+      let leaseLost = false;
+      const heartbeat = setInterval(() => {
+        if (!renewRouterPlan(this.db, plan.id, workerId) || !renewRouterTask(this.db, task.id, workerId)) leaseLost = true;
+      }, 30_000);
       try {
         const session = createAccessibleRuntimeSession(this.db, input.actorUserId, input.workspaceJid, {
           name: `Router ${plan.id.slice(-8)} · ${task.spec.title}`,
@@ -91,19 +104,22 @@ export class AgentRouterService {
           message: context ? `${task.spec.input}\n\n前置任务结果：\n${context}` : task.spec.input,
           idempotencyKey: `router:${plan.id}:${task.id}`,
         });
-        if (!setRouterTaskStatus(this.db, task.id, 'completed', { text: run.reply ?? '' }, workerId)) throw new RouterDispatchBusyError();
+        if (leaseLost || !setRouterTaskStatus(this.db, task.id, 'completed', { text: run.reply ?? '' }, workerId)) throw new RouterDispatchBusyError();
         appendRouterEvent(this.db, plan.id, task.id, { type: 'task_completed', ordinal: task.spec.ordinal, text: run.reply ?? '' });
         results.push({ taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'completed', text: run.reply ?? '' });
       } catch (error) {
+        if (error instanceof RouterDispatchBusyError) throw error;
         const message = error instanceof Error ? error.message : String(error);
-        setRouterTaskStatus(this.db, task.id, 'failed', { error: message }, workerId);
+        if (leaseLost || !setRouterTaskStatus(this.db, task.id, 'failed', { error: message }, workerId)) throw new RouterDispatchBusyError();
         appendRouterEvent(this.db, plan.id, task.id, { type: 'task_failed', ordinal: task.spec.ordinal, error: message });
         results.push({ taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'failed', text: null, error: message });
         failed = true;
+      } finally {
+        clearInterval(heartbeat);
       }
     }
     const result = this.resultFromTasks(input, plan, results);
-    setRouterPlanStatus(this.db, plan.id, failed ? 'failed' : 'completed', result, workerId);
+    if (!setRouterPlanStatus(this.db, plan.id, failed ? 'failed' : 'completed', result, workerId)) throw new RouterDispatchBusyError();
     appendRouterEvent(this.db, plan.id, null, { type: failed ? 'plan_failed' : 'plan_completed', planId: plan.id });
     return result;
   }
