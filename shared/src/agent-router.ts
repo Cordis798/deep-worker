@@ -2,7 +2,7 @@ export type AgentRouterPlanStatus = 'planned' | 'running' | 'completed' | 'faile
 export type AgentRouterTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'skipped';
 
 export interface AgentRouterCandidate {
-  bindingId: string;
+  bindingId: string | null;
   agentProfileId: string;
   name: string;
   capabilities: string[];

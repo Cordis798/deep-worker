@@ -28,6 +28,8 @@ import type { ContainerRunnerStatusSource } from './monitoring.js';
 import { readMountAllowlist, validateAdditionalMounts } from './mount-security.js';
 import { createUsageRoutes } from './routes/usage.js';
 import { createBillingRoutes } from './routes/billing.js';
+import { createAgentRouterRoutes } from './routes/agent-router.js';
+import { AgentRouterService } from './agent-router/service.js';
 
 export type App = Hono<{ Variables: AppVariables }> & {
   close: () => Promise<void>;
@@ -85,6 +87,7 @@ export function createApp(
     '/api/workspaces',
     createRunnerRoutes(db, runnerService, nodeWebSocket.upgradeWebSocket),
   );
+  app.route('/api/workspaces', createAgentRouterRoutes(db, new AgentRouterService(db, runnerService)));
   app.route('/api/workspaces', workspaceTools);
   app.route('/api/channel-accounts', createChannelAccountRoutes(db));
   app.route('/api/capabilities', createCapabilityRoutes(db));

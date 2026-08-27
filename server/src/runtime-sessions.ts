@@ -89,7 +89,13 @@ function canUseProfile(
   const workspace = getWorkspaceById(db, workspaceJid);
   if (!workspace) return false;
   if (profile.owner_user_id === actorUserId) return true;
-  return workspace.agent_profile_id === profileId && !!getWorkspaceAccess(db, actorUserId, workspaceJid);
+  if (workspace.agent_profile_id === profileId && !!getWorkspaceAccess(db, actorUserId, workspaceJid)) return true;
+  return !!db.prepare(
+    `SELECT 1 FROM workspace_agent_bindings b
+     JOIN workspace_members m ON m.workspace_jid = b.workspace_jid
+     WHERE b.workspace_jid = ? AND b.agent_profile_id = ?
+       AND b.enabled = 1 AND m.user_id = ? AND m.status = 'active'`,
+  ).get(workspaceJid, profileId, actorUserId);
 }
 
 export function createAccessibleRuntimeSession(

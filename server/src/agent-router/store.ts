@@ -6,6 +6,7 @@ import type {
   AgentRouterPlanStatus,
   AgentRouterResult,
   AgentRouterTaskResult,
+  AgentRouterTaskSpec,
   AgentRouterTaskStatus,
 } from '@deep-worker/shared';
 import { canWorkspaceAction } from '../workspace-acl.js';
@@ -34,6 +35,16 @@ export interface AgentRouterPlanRow {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+}
+
+export interface AgentRouterTaskRow {
+  id: string;
+  planId: string;
+  spec: AgentRouterTaskSpec;
+  status: AgentRouterTaskStatus;
+  attempt: number;
+  resultText: string | null;
+  error: string | null;
 }
 
 interface PlanDbRow {
@@ -186,6 +197,32 @@ export function getRouterTasks(db: Db, actorUserId: string, workspaceJid: string
     status: String(row.status) as AgentRouterTaskStatus,
     text: parse<{ text?: string }>(String(row.result_json))?.text ?? null,
     ...(row.error ? { error: String(row.error) } : {}),
+  }));
+}
+
+export function listRouterTaskRows(db: Db, actorUserId: string, workspaceJid: string, planId: string): AgentRouterTaskRow[] | undefined {
+  if (!getRouterPlan(db, actorUserId, workspaceJid, planId)) return undefined;
+  const rows = db.prepare(
+    `SELECT id, plan_id, ordinal, agent_binding_id, agent_profile_id, title,
+            input_json, status, attempt, result_json, error
+     FROM agent_router_tasks WHERE plan_id = ? ORDER BY ordinal`,
+  ).all(planId) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({
+    id: String(row.id),
+    planId: String(row.plan_id),
+    spec: {
+      ordinal: Number(row.ordinal),
+      bindingId: row.agent_binding_id ? String(row.agent_binding_id) : null,
+      agentProfileId: String(row.agent_profile_id),
+      title: String(row.title),
+      requiredCapabilities: parse<{ requiredCapabilities?: string[] }>(String(row.input_json))?.requiredCapabilities ?? [],
+      input: parse<{ input?: string }>(String(row.input_json))?.input ?? '',
+      dependsOn: parse<{ dependsOn?: number[] }>(String(row.input_json))?.dependsOn ?? [],
+    },
+    status: String(row.status) as AgentRouterTaskStatus,
+    attempt: Number(row.attempt),
+    resultText: parse<{ text?: string }>(String(row.result_json))?.text ?? null,
+    error: row.error ? String(row.error) : null,
   }));
 }
 

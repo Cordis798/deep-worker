@@ -38,7 +38,10 @@ export function buildAgentRouterPlan(
   const inferred = inferRouteIntent(message);
   const tasks: AgentRouterTaskSpec[] = [];
   const matchedRules = INTENT_RULES.filter((rule) => includesAny(message, rule.tokens));
-  const taskRules = matchedRules.length > 1 ? matchedRules : [{ intent: inferred.intent, capabilities: inferred.requiredCapabilities, tokens: [] }];
+  const distinctMatches = new Set(matchedRules.map((rule) => choose(candidates, rule.capabilities, rule.intent)?.bindingId).filter(Boolean));
+  const taskRules = matchedRules.length > 1 && distinctMatches.size > 1
+    ? matchedRules
+    : [{ intent: inferred.intent, capabilities: inferred.requiredCapabilities, tokens: [] }];
   for (const [ordinal, rule] of taskRules.entries()) {
     const candidate = choose(candidates, rule.capabilities, rule.intent);
     if (!candidate) continue;
