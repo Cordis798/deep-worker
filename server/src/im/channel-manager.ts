@@ -28,6 +28,7 @@ export interface ChannelManagerOptions {
   transportFactory: (provider: ChannelProvider, accountId: string) => ChannelTransport;
   registry?: ChannelAdapterRegistry;
   onAgentMessage?: (input: ChannelAgentMessageInput) => Promise<string | null>;
+  onRouterMessage?: (input: ChannelAgentMessageInput) => Promise<string | null>;
   retryBaseMs?: number;
   maxAttempts?: number;
 }
@@ -52,7 +53,12 @@ export class ChannelManager {
     this.onAgentMessage = options.onAgentMessage;
     this.retryBaseMs = options.retryBaseMs ?? 100;
     this.maxAttempts = options.maxAttempts ?? 3;
-    this.commands = createChannelCommandService({ db: this.db, mounts: this.mounts });
+    this.commands = createChannelCommandService({
+      db: this.db,
+      mounts: this.mounts,
+      onRouteMessage: options.onRouterMessage,
+      onSingleMessage: options.onAgentMessage,
+    });
   }
 
   async connectAccount(ownerUserId: string, accountId: string): Promise<void> {

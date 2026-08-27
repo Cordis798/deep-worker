@@ -13,6 +13,8 @@ export type ChannelCommand =
   | { kind: 'bind'; workspace: string }
   | { kind: 'unbind' }
   | { kind: 'new'; name?: string }
+  | { kind: 'route'; message: string }
+  | { kind: 'single'; message: string }
   | { kind: 'clear' }
   | { kind: 'help' }
   | { kind: 'unknown'; name: string };
@@ -41,12 +43,20 @@ export function parseChannelCommand(value: string): ChannelCommand | null {
   if (name === 'help') return { kind: 'help' };
   if (name === 'bind') return { kind: 'bind', workspace: parts.join(' ').trim() };
   if (name === 'new') return { kind: 'new', ...(parts.length ? { name: parts.join(' ').trim() } : {}) };
+  if (name === 'route') return { kind: 'route', message: parts.join(' ').trim() };
+  if (name === 'single') return { kind: 'single', message: parts.join(' ').trim() };
   return { kind: 'unknown', name };
 }
 
-const HELP_TEXT = '可用命令：/list、/status、/where、/bind <工作区 JID>、/unbind、/new [名称]、/clear、/help';
+const HELP_TEXT = '可用命令：/list、/status、/where、/bind <工作区 JID>、/unbind、/new [名称]、/route <跨岗位任务>、/single <普通对话>、/clear、/help';
 
-export function createChannelCommandService(options: { db: Database.Database; mounts: MountService; clearSession?: (sessionId: string) => Promise<void> | void }) {
+export function createChannelCommandService(options: {
+  db: Database.Database;
+  mounts: MountService;
+  clearSession?: (sessionId: string) => Promise<void> | void;
+  onRouteMessage?: (input: { ownerUserId: string; message: ChannelInboundMessage; route: NonNullable<Extract<ReturnType<MountService['resolveInbound']>, { status: 'resolved' }>['route']> }) => Promise<string | null>;
+  onSingleMessage?: (input: { ownerUserId: string; message: ChannelInboundMessage; route: NonNullable<Extract<ReturnType<MountService['resolveInbound']>, { status: 'resolved' }>['route']> }) => Promise<string | null>;
+}) {
   async function execute(value: string, context: ChannelCommandContext): Promise<ChannelCommandResult> {
     const command = parseChannelCommand(value);
     if (!command) return { handled: false, reply: '' };
@@ -79,6 +89,14 @@ export function createChannelCommandService(options: { db: Database.Database; mo
     }
 
     const resolved = options.mounts.resolveInbound({ ownerUserId: context.ownerUserId, message: context.message });
+    if (command.kind === 'route' || command.kind === 'single') {
+      if (!command.message) return { handled: true, reply: command.kind === 'route' ? '用法：/route <跨岗位任务>' : '用法：/single <普通对话>' };
+      if (resolved.status !== 'resolved') return { handled: true, reply: resolved.status === 'unbound' ? '当前群聊尚未绑定工作区。' : '当前聊天暂时没有可用路由。' };
+      const handler = command.kind === 'route' ? options.onRouteMessage : options.onSingleMessage;
+      if (!handler) return { handled: true, reply: '当前渠道未启用该路由模式。' };
+      const reply = await handler({ ownerUserId: context.ownerUserId, message: { ...context.message, text: command.message }, route: resolved.route });
+      return { handled: true, reply: reply ?? '任务已提交。' };
+    }
     if (command.kind === 'where') {
       return resolved.status === 'resolved' ? { handled: true, reply: `当前路由：工作区 ${resolved.route.workspaceJid}，Session ${resolved.route.sessionId}` } : { handled: true, reply: resolved.status === 'unbound' ? '当前群聊尚未绑定工作区。' : '当前聊天暂时没有可用路由。' };
     }
