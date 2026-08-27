@@ -112,7 +112,11 @@ export class AgentRouterService {
     }
     appendRouterEvent(this.db, plan.id, null, { type: 'plan_started', planId: plan.id });
     if (tasks.length > 1 && tasks.every((task) => task.spec.dependsOn.length === 0)) {
-      return this.dispatchIndependentTasks(input, plan, tasks, workerId, abortController);
+      try {
+        return await this.dispatchIndependentTasks(input, plan, tasks, workerId, abortController);
+      } finally {
+        this.activeDispatches.delete(plan.id);
+      }
     }
     const results: AgentRouterTaskResult[] = [];
     let failed = false;
