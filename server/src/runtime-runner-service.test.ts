@@ -155,6 +155,32 @@ describe('RuntimeRunnerService', () => {
     await service.close();
   });
 
+  it('成员降权为访客后，运行中的回合会被撤销且不重试', async () => {
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO workspace_members (
+        workspace_jid, user_id, role, job_role, capability_package, status,
+        invited_by, created_at, updated_at, revoked_at
+      ) VALUES ('w1', 'u1', 'workspace_admin', 'general', 'general', 'active', 'u1', ?, ?, NULL)`,
+    ).run(now, now);
+    const runner = new FakePiRunner({ response: '不应完成', delayMs: 1200 });
+    const service = new RuntimeRunnerService({ db, runner, retryBaseMs: 0, maxAttempts: 3 });
+    const pending = service.submit({
+      ownerUserId: 'u1',
+      workspaceJid: 'w1',
+      sessionId: 's1',
+      message: '权限变更',
+      idempotencyKey: 'permission-revoked',
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    db.prepare("UPDATE workspace_members SET role = 'viewer', updated_at = ? WHERE workspace_jid = 'w1' AND user_id = 'u1'").run(new Date().toISOString());
+    const result = await pending;
+    expect(result.turn.status).toBe('failed');
+    expect(result.turn.error).toContain('aborted');
+    expect(runner.calls).toHaveLength(1);
+    await service.close();
+  });
+
   it('retries a failed runner and preserves the final durable state', async () => {
     const runner = new FakePiRunner({ response: 'recovered', failuresBeforeSuccess: 2 });
     const service = new RuntimeRunnerService({

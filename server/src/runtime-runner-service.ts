@@ -6,7 +6,7 @@ import { SessionQueue, type SessionQueueOptions } from '@deep-worker/pi-runner';
 import type { StreamEvent } from '@deep-worker/shared';
 import { getAgentProfileById } from './agent-profiles.js';
 import { getAccessibleRuntimeSession } from './runtime-sessions.js';
-import { getWorkspaceAccess } from './workspace-acl.js';
+import { canWorkspaceAction, getWorkspaceAccess } from './workspace-acl.js';
 import { getWorkspaceById, workspaceRoot } from './workspaces.js';
 import { getUserById } from './users.js';
 import { effectiveExecutionMode } from './execution-policy.js';
@@ -96,6 +96,7 @@ function shouldRetryRunnerError(message: string): boolean {
     '余额不足',
     '未找到有效套餐',
     '当前账户不可用',
+    '工作区对话权限已撤销',
   ].some((marker) => message.includes(marker));
 }
 
@@ -214,8 +215,13 @@ export class RuntimeRunnerService {
       let selectedProviderPool: ProviderPool | undefined;
       let usageAgentId: string | null = null;
       let usageModel: string | undefined;
+      let permissionRevoked = false;
       try {
         const access = getWorkspaceAccess(this.db, inbox.ownerUserId, inbox.workspaceJid);
+        if (!access || !canWorkspaceAction(this.db, inbox.ownerUserId, inbox.workspaceJid, 'converse')) {
+          permissionRevoked = true;
+          throw new Error('工作区对话权限已撤销');
+        }
         const session = getAccessibleRuntimeSession(
           this.db,
           inbox.ownerUserId,
@@ -245,6 +251,16 @@ export class RuntimeRunnerService {
         const profile = session.agent_profile_id
           ? getAgentProfileById(this.db, session.agent_profile_id)
           : undefined;
+        const executionAbortController = new AbortController();
+        const forwardAbort = () => executionAbortController.abort();
+        if (options.signal?.aborted) executionAbortController.abort();
+        else options.signal?.addEventListener('abort', forwardAbort, { once: true });
+        const permissionWatch = setInterval(() => {
+          if (!canWorkspaceAction(this.db, inbox.ownerUserId, inbox.workspaceJid, 'converse')) {
+            permissionRevoked = true;
+            executionAbortController.abort();
+          }
+        }, 1000);
         const request: AgentRunRequest = {
           ownerUserId: inbox.ownerUserId,
           sessionId: inbox.sessionId,
@@ -258,51 +274,56 @@ export class RuntimeRunnerService {
           identityHash: profile?.identity_hash,
           capabilities,
           capabilityHash: capabilities?.hash,
-          abortSignal: options.signal,
+          abortSignal: executionAbortController.signal,
           provider: selectedProvider
             ? mapProviderToPiProvider(selectedProvider, getProviderCredentials(this.db, principalUserId, selectedProvider.id))
             : undefined,
         };
-        await fs.mkdir(request.cwd!, { recursive: true });
-        const executionRunner = effectiveExecutionMode(this.db, workspace) === 'container'
-          ? this.containerRunner
-          : this.runner;
-        await runnerLifecycle.waitUntilResumed();
-        const result = await executionRunner.run(request, (event) => {
-          events.push(event);
-          this.persistAndPublish(inbox.sessionId, turnId, nextOrdinal, event);
-          nextOrdinal += 1;
-        });
-        if (events.length === 0) {
-          for (const event of result.events) {
+        try {
+          await fs.mkdir(request.cwd!, { recursive: true });
+          const executionRunner = effectiveExecutionMode(this.db, workspace) === 'container'
+            ? this.containerRunner
+            : this.runner;
+          await runnerLifecycle.waitUntilResumed();
+          const result = await executionRunner.run(request, (event) => {
             events.push(event);
             this.persistAndPublish(inbox.sessionId, turnId, nextOrdinal, event);
             nextOrdinal += 1;
-          }
-        }
-        const usageEvent = [...events].reverse().find((event) => event.eventType === 'usage' && event.usage)?.usage;
-        if (usageEvent) {
-          recordUsageEvent({
-            db: this.db,
-            eventId: `runner:${turnId}`,
-            userId: principalUserId,
-            workspaceJid: inbox.workspaceJid,
-            agentId: usageAgentId,
-            messageId: inbox.id,
-            source: 'agent',
-            model: usageModel,
-            usage: usageEvent,
           });
+          if (events.length === 0) {
+            for (const event of result.events) {
+              events.push(event);
+              this.persistAndPublish(inbox.sessionId, turnId, nextOrdinal, event);
+              nextOrdinal += 1;
+            }
+          }
+          const usageEvent = [...events].reverse().find((event) => event.eventType === 'usage' && event.usage)?.usage;
+          if (usageEvent) {
+            recordUsageEvent({
+              db: this.db,
+              eventId: `runner:${turnId}`,
+              userId: principalUserId,
+              workspaceJid: inbox.workspaceJid,
+              agentId: usageAgentId,
+              messageId: inbox.id,
+              source: 'agent',
+              model: usageModel,
+              usage: usageEvent,
+            });
+          }
+          if (selectedProviderId) selectedProviderPool?.reportSuccess(selectedProviderId);
+          completeRunnerTurn(this.db, turnId, this.workerId, result.reply);
+          const completed = getRunnerTurnById(this.db, turnId)!;
+          return { turn: completed, reply: result.reply, events };
+        } finally {
+          clearInterval(permissionWatch);
+          options.signal?.removeEventListener('abort', forwardAbort);
         }
-        if (selectedProviderId) selectedProviderPool?.reportSuccess(selectedProviderId);
-        completeRunnerTurn(this.db, turnId, this.workerId, result.reply);
-        const completed = getRunnerTurnById(this.db, turnId)!;
-        return { turn: completed, reply: result.reply, events };
       } catch (error) {
         if (typeof selectedProviderId === 'string') selectedProviderPool?.reportFailure(selectedProviderId, true);
         const message = error instanceof Error ? error.message : String(error);
         const current = getRunnerTurnById(this.db, turnId)!;
-        if (!options.signal?.aborted && shouldRetryRunnerError(message) && current.attempt < this.maxAttempts) {
+        if (!permissionRevoked && !options.signal?.aborted && shouldRetryRunnerError(message) && current.attempt < this.maxAttempts) {
           const delayMs = Math.min(5_000, this.retryBaseMs * 2 ** (current.attempt - 1));
           retryRunnerTurn(
             this.db,
