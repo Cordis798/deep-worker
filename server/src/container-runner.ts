@@ -5,14 +5,11 @@ import type {
   AgentRunRequest,
   AgentRunResult,
   AgentRunner,
-  SessionClient,
 } from '@deep-worker/pi-runner';
-import { PiRpcClient } from '@deep-worker/pi-runner';
-import { extractFinalReply } from '@deep-worker/pi-runner';
+import type { PiSdkWorkerClientOptions, RuntimeSession } from '@deep-worker/pi-runner';
+import { PiSdkWorkerClient } from '@deep-worker/pi-runner';
 import { assemblePrompt } from '@deep-worker/pi-runner';
-import { mapPiEvent } from '@deep-worker/pi-runner';
-import { materializePiProviderConfig } from '@deep-worker/pi-runner';
-import type { RpcEvent } from '@deep-worker/pi-runner';
+import { mapRuntimeEvent } from '@deep-worker/pi-runner';
 import { DATA_DIR } from './config.js';
 
 export interface ContainerMount {
@@ -32,15 +29,21 @@ export interface ContainerRunnerOptions {
   image?: string;
   dockerCommand?: string;
   defaultLimits?: Partial<ContainerLimits>;
-  spawnClient?: (options: ConstructorParameters<typeof PiRpcClient>[0]) => SessionClient;
+  spawnClient?: (options: PiSdkWorkerClientOptions) => ContainerWorkerClient;
   validateAdditionalMounts?: (
     ownerUserId: string | undefined,
     mounts: readonly ContainerMount[],
   ) => ContainerMount[];
 }
 
+export interface ContainerWorkerClient extends RuntimeSession {
+  start(): Promise<void>;
+  close(): Promise<void>;
+  getStderrTail?(): string;
+}
+
 interface ManagedContainerSession {
-  client: SessionClient;
+  client: ContainerWorkerClient;
   providerHash?: string;
   lastUsedAt: number;
 }
@@ -162,7 +165,7 @@ function providerEnvironment(request: AgentRunRequest): NodeJS.ProcessEnv {
   return { ...process.env, ...(request.provider?.env ?? {}) };
 }
 
-/** 通过 Docker 运行 Pi RPC；容器失败时不会静默降级为 Host。 */
+/** 通过 Docker 运行容器内的直接 SDK Worker；失败时不会静默降级为 Host。 */
 export class ContainerRunner implements AgentRunner {
   private readonly options: Required<Pick<ContainerRunnerOptions, 'image' | 'dockerCommand'>> &
     ContainerRunnerOptions;
@@ -181,7 +184,6 @@ export class ContainerRunner implements AgentRunner {
   async run(request: AgentRunRequest, onEvent?: AgentEventListener): Promise<AgentRunResult> {
     const session = await this.getOrCreate(request);
     const prompt = assemblePrompt({
-      systemPrompt: request.systemPrompt,
       history: request.history,
       currentMessage: request.message,
       outputContract: request.outputContract ?? 'Return the final answer only.',
@@ -196,36 +198,31 @@ export class ContainerRunner implements AgentRunner {
           }
         : undefined,
     });
-    const rawEvents: RpcEvent[] = [];
     const events = [] as AgentRunResult['events'];
-    try {
-      if (request.provider && session.client.setModel) {
-        await session.client.setModel(request.provider.provider, request.provider.modelId);
+    const unsubscribe = session.client.subscribe((runtimeEvent) => {
+      for (const event of mapRuntimeEvent(runtimeEvent, {
+        sessionId: request.sessionId,
+        turnId: request.turnId,
+        queryRunId: request.queryRunId,
+      })) {
+        events.push(event);
+        onEvent?.(event);
       }
-      const completed = await session.client.promptAndWait?.(prompt, {
-        timeoutMs: request.timeoutMs,
-        onEvent: (rawEvent) => {
-          rawEvents.push(rawEvent);
-          for (const event of mapPiEvent(rawEvent, {
-            sessionId: request.sessionId,
-            turnId: request.turnId,
-            queryRunId: request.queryRunId,
-          })) {
-            events.push(event);
-            onEvent?.(event);
-          }
-        },
-      });
-      if (!completed) throw new Error('容器 Pi 会话不支持 prompt');
-      const reply =
-        extractFinalReply(rawEvents) || (await session.client.getLastAssistantText?.()) || '';
+    });
+    try {
+      const result = await this.promptWithTimeout(session.client, prompt, request.timeoutMs);
+      if (result.finalizationReason === 'error') {
+        throw new Error(result.error ?? `容器 SDK 停止：${result.stopReason ?? 'error'}`);
+      }
       session.lastUsedAt = Date.now();
-      return { sessionId: request.sessionId, reply, events, attempts: 1 };
+      return { sessionId: request.sessionId, reply: result.text, events, attempts: 1 };
     } catch (error) {
-      // 超时或 RPC 退出后销毁容器，避免遗留进程继续占用资源。
+      // 超时或 Worker 退出后销毁容器，避免遗留进程继续占用资源。
       this.sessions.delete(request.sessionId);
       await session.client.close().catch(() => undefined);
       throw error;
+    } finally {
+      unsubscribe();
     }
   }
 
@@ -254,12 +251,8 @@ export class ContainerRunner implements AgentRunner {
       request.sessionDir ?? path.join(DATA_DIR, 'container-sessions', request.sessionId),
     );
     fs.mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
-    const providerConfigDir = await materializePiProviderConfig(request.provider, sessionDir);
     const containerEnv = {
       ...(request.provider?.env ?? {}),
-      ...(providerConfigDir
-        ? { PI_CODING_AGENT_DIR: '/session/pi-config', PI_OFFLINE: '1' }
-        : {}),
     };
     const additionalMounts =
       request.containerMounts && this.options.validateAdditionalMounts
@@ -280,24 +273,54 @@ export class ContainerRunner implements AgentRunner {
       },
     );
     const client = (
-      this.options.spawnClient ?? ((clientOptions) => new PiRpcClient(clientOptions))
+      this.options.spawnClient ?? ((clientOptions) => new PiSdkWorkerClient(clientOptions))
     )({
       command: built.command,
-      commandPrefixArgs: [...built.args, 'pi'],
+      commandPrefixArgs: [...built.args, 'node', '/app/pi-runner/dist/pi-sdk-worker.js'],
       cwd: process.cwd(),
       env: {
         ...providerEnvironment(request),
         ...containerEnv,
       },
-      sessionDir: '/session',
-      tools: ['bash'],
+      runtimeOptions: {
+        sessionId: request.sessionId,
+        cwd: '/workspace',
+        sessionDir: '/session',
+        systemPrompt: request.systemPrompt,
+        provider: request.provider
+          ? { ...request.provider, env: undefined }
+          : undefined,
+        capabilities: request.capabilities,
+        allowedTools: ['bash'],
+      },
       requestTimeoutMs: 30_000,
-      startupTimeoutMs: 1_000,
+      startupTimeoutMs: 30_000,
     });
     await client.start();
-    await client.getState();
     const managed = { client, providerHash, lastUsedAt: Date.now() };
     this.sessions.set(request.sessionId, managed);
     return managed;
+  }
+
+  private async promptWithTimeout(
+    client: ContainerWorkerClient,
+    prompt: string,
+    timeoutMs?: number,
+  ) {
+    if (!timeoutMs) return client.prompt({ text: prompt });
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        client.prompt({ text: prompt }),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            void client.abort().catch(() => undefined);
+            reject(new Error(`容器 SDK 任务超时：${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 }

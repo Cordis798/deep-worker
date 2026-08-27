@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ContainerRunner, buildContainerArgs } from './container-runner.js';
+import { ContainerRunner, buildContainerArgs, type ContainerWorkerClient } from './container-runner.js';
 
 describe('容器运行器', () => {
   it('生成非 root、只读根文件系统、资源限制和显式挂载参数', () => {
@@ -109,27 +109,35 @@ describe('容器运行器', () => {
     fs.mkdirSync(workspace);
     fs.mkdirSync(session);
     let clientClosed = false;
-    let model: string | undefined;
     let clientOptions:
-      { command?: string; commandPrefixArgs?: string[]; env?: NodeJS.ProcessEnv } | undefined;
-    const client = {
+      { command?: string; commandPrefixArgs?: string[]; env?: NodeJS.ProcessEnv; runtimeOptions?: { provider?: { env?: NodeJS.ProcessEnv } } } | undefined;
+    const listeners = new Set<(event: any) => void>();
+    const client: ContainerWorkerClient = {
+      sessionId: 'container-session',
+      isStreaming: false,
       start: async () => undefined,
       close: async () => {
         clientClosed = true;
       },
-      getState: async () => ({ sessionId: 'container-session' }),
-      setModel: async (provider: string, modelId: string) => {
-        model = `${provider}/${modelId}`;
-        return {};
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
       },
-      getLastAssistantText: async () => '容器回复',
-      promptAndWait: async (
-        _message: string,
-        options?: { onEvent?: (event: { type: string }) => void },
-      ) => {
-        options?.onEvent?.({ type: 'agent_settled' });
-        return [{ type: 'agent_settled' }];
+      prompt: async () => {
+        for (const listener of listeners) {
+          listener({ type: 'text_delta', sessionId: 'container-session', delta: '容器' });
+        }
+        return {
+          text: '容器回复',
+          sessionId: 'container-session',
+          finalizationReason: 'completed' as const,
+        };
       },
+      steer: async () => { throw new Error('not used'); },
+      followUp: async () => { throw new Error('not used'); },
+      abort: async () => undefined,
+      compact: async () => undefined,
+      dispose: () => undefined,
     };
     try {
       const runner = new ContainerRunner({
@@ -158,34 +166,26 @@ describe('容器运行器', () => {
         },
       });
       expect(result.reply).toBe('容器回复');
-      expect(model).toBe('openai/test-model');
       expect(clientOptions?.command).toBe('docker');
       expect(clientOptions?.commandPrefixArgs).toEqual(
-        expect.arrayContaining(['run', 'test-image:latest', 'pi']),
+        expect.arrayContaining(['run', 'test-image:latest', 'node', '/app/pi-runner/dist/pi-sdk-worker.js']),
       );
-      expect(clientOptions?.commandPrefixArgs?.slice(-2)).toEqual(['test-image:latest', 'pi']);
+      expect(clientOptions?.commandPrefixArgs?.slice(-3)).toEqual([
+        'test-image:latest',
+        'node',
+        '/app/pi-runner/dist/pi-sdk-worker.js',
+      ]);
       expect(clientOptions?.commandPrefixArgs).toEqual(
         expect.arrayContaining([
           '--env',
           'OPENAI_API_KEY',
-          '--env',
-          'PI_CODING_AGENT_DIR',
-          '--env',
-          'PI_OFFLINE',
         ]),
       );
       expect(clientOptions?.commandPrefixArgs).not.toContain('secret-value');
       expect(clientOptions?.env).toMatchObject({
         OPENAI_API_KEY: 'secret-value',
-        PI_CODING_AGENT_DIR: '/session/pi-config',
-        PI_OFFLINE: '1',
       });
-      const modelsJson = fs.readFileSync(
-        path.join(session, 'pi-config', 'models.json'),
-        'utf8',
-      );
-      expect(modelsJson).toContain('$OPENAI_API_KEY');
-      expect(modelsJson).not.toContain('secret-value');
+      expect(clientOptions?.runtimeOptions?.provider?.env).toBeUndefined();
       await runner.close();
       expect(clientClosed).toBe(true);
     } finally {
@@ -193,22 +193,27 @@ describe('容器运行器', () => {
     }
   });
 
-  it('超时或 RPC 失败时清理容器会话', async () => {
+  it('超时或 Worker 失败时清理容器会话', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-container-'));
     const workspace = path.join(root, 'workspace');
     const session = path.join(root, 'session');
     fs.mkdirSync(workspace);
     fs.mkdirSync(session);
     let clientClosed = false;
-    const client = {
+    const client: ContainerWorkerClient = {
+      sessionId: 'container-session',
+      isStreaming: false,
       start: async () => undefined,
       close: async () => {
         clientClosed = true;
       },
-      getState: async () => ({ sessionId: 'container-session' }),
-      promptAndWait: async () => {
-        throw new Error('Pi RPC 超时');
-      },
+      subscribe: () => () => undefined,
+      prompt: async () => new Promise<never>(() => undefined),
+      steer: async () => { throw new Error('not used'); },
+      followUp: async () => { throw new Error('not used'); },
+      abort: async () => undefined,
+      compact: async () => undefined,
+      dispose: () => undefined,
     };
     try {
       const runner = new ContainerRunner({ spawnClient: () => client });
@@ -218,8 +223,9 @@ describe('容器运行器', () => {
           message: '失败任务',
           cwd: workspace,
           sessionDir: session,
+          timeoutMs: 5,
         }),
-      ).rejects.toThrow('Pi RPC 超时');
+      ).rejects.toThrow('容器 SDK 任务超时');
       expect(clientClosed).toBe(true);
       expect(runner.size()).toBe(0);
     } finally {
