@@ -7,6 +7,8 @@ export interface CapabilityPackage {
   id: string;
   jobRole: JobRole;
   name: string;
+  /** Router 使用的抽象任务能力，* 表示允许全部任务能力。 */
+  taskCapabilities: string[];
   /** 使用资源名称匹配，* 表示该资源类型全部允许。 */
   allow: Partial<Record<GovernedResource, string[]>>;
   deny?: Partial<Record<GovernedResource, string[]>>;
@@ -18,6 +20,7 @@ export interface CapabilityGovernance {
   jobRole: JobRole;
   packageId: string;
   packageName: string;
+  taskCapabilities: string[];
   grants: Array<{ resource: GovernedResource; name: string; action: 'use' }>;
   denials: Array<{ resource: GovernedResource; name: string; action: 'use' }>;
   conflicts: string[];
@@ -29,6 +32,7 @@ export const BUILTIN_CAPABILITY_PACKAGES: readonly CapabilityPackage[] = [
     id: 'general',
     jobRole: 'general',
     name: '通用协作',
+    taskCapabilities: ['*'],
     allow: { skill: ['*'], mcp: ['*'], plugin: ['*'] },
     priority: 0,
   },
@@ -36,6 +40,7 @@ export const BUILTIN_CAPABILITY_PACKAGES: readonly CapabilityPackage[] = [
     id: 'engineering',
     jobRole: 'engineering',
     name: '研发能力包',
+    taskCapabilities: ['code', 'git', 'test'],
     allow: { skill: ['*'], mcp: ['git', 'github'], plugin: ['code-review', 'ci'] },
     priority: 10,
   },
@@ -43,6 +48,7 @@ export const BUILTIN_CAPABILITY_PACKAGES: readonly CapabilityPackage[] = [
     id: 'operations',
     jobRole: 'operations',
     name: '运维能力包',
+    taskCapabilities: ['deploy', 'monitor', 'logs'],
     allow: { skill: ['*'], mcp: ['monitoring', 'logs', 'release'], plugin: ['incident', 'release'] },
     priority: 10,
   },
@@ -50,6 +56,7 @@ export const BUILTIN_CAPABILITY_PACKAGES: readonly CapabilityPackage[] = [
     id: 'sales',
     jobRole: 'sales',
     name: '销售能力包',
+    taskCapabilities: ['crm', 'email'],
     allow: { skill: ['*'], mcp: ['crm', 'email'], plugin: ['crm', 'mail'] },
     priority: 10,
   },
@@ -112,11 +119,18 @@ export function resolveCapabilityGovernance(input: {
     jobRole: pkg.jobRole,
     packageId: pkg.id,
     packageName: pkg.name,
+    taskCapabilities: [...new Set(pkg.taskCapabilities)].sort(),
     grants,
     denials,
     conflicts: [...conflicts].sort(),
   };
   return { ...withoutHash, hash: hash(withoutHash) };
+}
+
+export function isTaskCapabilityAllowed(governance: CapabilityGovernance, capability: string): boolean {
+  const normalized = capability.trim().toLowerCase();
+  if (!normalized) return false;
+  return governance.taskCapabilities.some((item) => item === '*' || item.toLowerCase() === normalized);
 }
 
 export function isCapabilityAllowed(

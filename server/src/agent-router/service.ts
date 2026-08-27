@@ -5,6 +5,7 @@ import { getAgentProfileById } from '../agent-profiles.js';
 import { createAccessibleRuntimeSession } from '../runtime-sessions.js';
 import { RuntimeRunnerService } from '../runtime-runner-service.js';
 import { resolveCapabilitiesForWorkspace } from '../capabilities/capability-resolver.js';
+import { isTaskCapabilityAllowed, type CapabilityGovernance } from '../capabilities/capability-governance.js';
 import { getWorkspaceById } from '../workspaces.js';
 import { buildAgentRouterPlan } from './planner.js';
 import {
@@ -55,14 +56,17 @@ export class AgentRouterService {
   ) {}
 
   plan(input: { actorUserId: string; workspaceJid: string; sessionId?: string | null; message: string }): AgentRouterPlanRow {
-    const candidates = this.candidates(input.actorUserId, input.workspaceJid);
-    const route = buildAgentRouterPlan(input.message, candidates);
+    let candidates = this.candidates(input.actorUserId, input.workspaceJid);
     let capabilityHash: string | null = null;
     try {
-      capabilityHash = resolveCapabilitiesForWorkspace(this.db, input.actorUserId, input.workspaceJid).hash;
+      const manifest = resolveCapabilitiesForWorkspace(this.db, input.actorUserId, input.workspaceJid);
+      capabilityHash = manifest.hash;
+      candidates = this.applyTaskGovernance(candidates, manifest.governance);
     } catch {
-      // The planner still records a rejectable plan; dispatch will surface the exact reason.
+      // 治理解析失败时不向 Planner 暴露未过滤候选，避免越权路由。
+      candidates = [];
     }
+    const route = buildAgentRouterPlan(input.message, candidates);
     return createRouterPlan(this.db, input.actorUserId, input.workspaceJid, input.sessionId ?? null, input.message, route, capabilityHash);
   }
 
@@ -304,6 +308,16 @@ export class AgentRouterService {
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
     }];
+  }
+
+  private applyTaskGovernance(candidates: AgentBindingRow[], governance?: CapabilityGovernance): AgentBindingRow[] {
+    if (!governance) return candidates;
+    return candidates.map((candidate) => ({
+      ...candidate,
+      capabilities: candidate.capabilities.includes('*') && governance.taskCapabilities.includes('*')
+        ? ['*']
+        : candidate.capabilities.filter((capability) => isTaskCapabilityAllowed(governance, capability)),
+    }));
   }
 
   private resultFromTasks(input: { planId: string }, plan: AgentRouterPlanRow, tasks: AgentRouterTaskResult[]): AgentRouterResult {

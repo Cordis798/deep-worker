@@ -34,4 +34,10 @@ describe('agent router planner', () => {
     expect(plan.tasks.every((task) => task.dependsOn.length === 0)).toBe(true);
     expect(plan.explanation).toContain('并行调度');
   });
+
+  it('缺少任务能力时拒绝路由而不静默降级', () => {
+    const plan = buildAgentRouterPlan('请发布上线', [candidates[0]]);
+    expect(plan.tasks).toHaveLength(0);
+    expect(plan.fallback).toBe('reject');
+  });
 });

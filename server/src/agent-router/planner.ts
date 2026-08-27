@@ -63,7 +63,7 @@ export function buildAgentRouterPlan(
       risk: rule.risk,
     });
   }
-  if (tasks.length === 0 && candidates.length > 0) {
+  if (tasks.length === 0 && candidates.length > 0 && inferred.requiredCapabilities.length === 0) {
     const fallback = choose(candidates, [], 'general') ?? candidates[0];
     tasks.push({ ordinal: 0, bindingId: fallback.bindingId, agentProfileId: fallback.agentProfileId, title: `${fallback.name}：通用处理`, requiredCapabilities: [], input: message, dependsOn: [], risk: 'read' });
   }

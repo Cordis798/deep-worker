@@ -4,6 +4,12 @@ import { createApp } from '../app.js';
 import { initDatabase } from '../db/migration.js';
 import { cookieValue, jsonRequest } from '../helpers/test-app.js';
 
+async function registerMember(app: ReturnType<typeof createApp>, username: string) {
+  const response = await app.request('/api/auth/register', jsonRequest('/api/auth/register', { username, password: 'password123' }));
+  expect(response.status).toBe(201);
+  return { cookie: cookieValue(response), userId: ((await response.json()) as { user: { id: string } }).user.id };
+}
+
 describe('agent router routes', () => {
   let app: ReturnType<typeof createApp> | undefined;
   let db: ReturnType<typeof initDatabase> | undefined;
@@ -83,5 +89,29 @@ describe('agent router routes', () => {
     const cancelledBody = (await cancelledDispatch.json()) as { result: { status: string; tasks: Array<{ status: string }> } };
     expect(cancelledBody.result.status).toBe('cancelled');
     expect(cancelledBody.result.tasks.every((task) => task.status === 'skipped')).toBe(true);
+  });
+
+  it('按成员岗位能力过滤 Router 候选并拒绝越界任务', async () => {
+    db = initDatabase(':memory:');
+    app = createApp({ db, runner: new FakePiRunner() });
+    const setup = await app.request('/api/auth/setup', jsonRequest('/api/auth/setup', { username: 'owner', password: 'password123' }));
+    expect(setup.status).toBe(201);
+    const ownerCookie = cookieValue(setup);
+    const member = await registerMember(app, 'engmember');
+    const profileResponse = await app.request('/api/agent-profiles', jsonRequest('/api/agent-profiles', { name: '运维 Agent' }, ownerCookie));
+    const profile = (await profileResponse.json()) as { agent_profile: { id: string } };
+    const workspaceResponse = await app.request('/api/workspaces', jsonRequest('/api/workspaces', { name: '岗位治理工作区', agent_profile_id: profile.agent_profile.id }, ownerCookie));
+    const workspace = (await workspaceResponse.json()) as { workspace: { jid: string } };
+    const jid = workspace.workspace.jid;
+    const binding = await app.request(`/api/workspaces/${jid}/agents`, jsonRequest(`/api/workspaces/${jid}/agents`, { agent_profile_id: profile.agent_profile.id, capabilities: ['deploy'], role_tags: ['operations'] }, ownerCookie));
+    expect(binding.status).toBe(201);
+    const added = await app.request(`/api/workspaces/${jid}/members`, jsonRequest(`/api/workspaces/${jid}/members`, { user_id: member.userId, role: 'member', job_role: 'engineering' }, ownerCookie));
+    expect(added.status).toBe(201);
+
+    const planned = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '请发布上线' }, member.cookie));
+    expect(planned.status).toBe(201);
+    const body = (await planned.json()) as { plan: { route: { tasks: unknown[]; fallback: string } } };
+    expect(body.plan.route.tasks).toHaveLength(0);
+    expect(body.plan.route.fallback).toBe('reject');
   });
 });

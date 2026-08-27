@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isCapabilityAllowed, resolveCapabilityGovernance } from './capability-governance.js';
+import { isCapabilityAllowed, isTaskCapabilityAllowed, resolveCapabilityGovernance } from './capability-governance.js';
 
 describe('capability governance', () => {
   it('maps job roles to explicit capability packages', () => {
@@ -7,6 +7,8 @@ describe('capability governance', () => {
     expect(engineering.packageId).toBe('engineering');
     expect(isCapabilityAllowed(engineering, 'skill', 'git')).toBe(true);
     expect(isCapabilityAllowed(engineering, 'mcp', 'crm')).toBe(false);
+    expect(isTaskCapabilityAllowed(engineering, 'code')).toBe(true);
+    expect(isTaskCapabilityAllowed(engineering, 'deploy')).toBe(false);
     expect(engineering.hash).toMatch(/^[a-f0-9]{64}$/);
   });
 
