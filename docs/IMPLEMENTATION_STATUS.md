@@ -13,7 +13,7 @@
 | 能力解析 | Skill 优先级、依赖、冲突、岗位 allow/deny、稳定 hash 与解析审计已落库；运行时可恢复受治理 MCP 连接配置，并按任务能力裁剪 MCP/Plugin 交集 | `server/src/capabilities/capability-resolver.ts`、`server/src/capabilities/capability-governance.ts` |
 | Skill 注入 | 有效 Skill 会复制到隔离 Session 目录，再通过 SDK Resource Loader 加载 | `pi-runner/src/capability-injection.ts` |
 | MCP 工具桥接 | Pi Agent SDK 会话启动时发现受治理 MCP 工具，注册稳定名称的 custom tools；调用支持取消、结果截断和生命周期关闭；只读回合按 MCP 工具只读/破坏性标记过滤 | `pi-runner/src/mcp-tool-bridge.ts`、`pi-runner/src/capability-injection.ts` |
-| Agent Router | 根据任务意图、岗位标签和能力选择 Agent，并先按成员岗位能力包裁剪候选；持久化 Plan/Task/Event；有依赖任务按顺序执行，纯只读任务可按显式并行意图分批调度并汇总结果；高风险计划必须通过一次性审批，支持拒绝、过期和取消；派发前复核计划能力 hash、Agent 绑定和创建者身份 | `server/src/agent-router/`、`server/src/capabilities/capability-governance.ts` |
+| Agent Router | 根据任务意图、岗位标签和能力选择 Agent，并先按成员岗位能力包裁剪候选；持久化 Plan/Task/Event；有依赖任务按顺序执行，纯只读任务可按显式并行意图分批调度并汇总结果；高风险计划必须通过一次性审批，支持拒绝、过期和取消；派发前复核计划能力 hash、Agent 绑定、AgentProfile 内容指纹和创建者身份 | `server/src/agent-router/`、`server/src/capabilities/capability-governance.ts` |
 | 并发安全 | Plan 与 Task 使用 SQLite 租约；重复 dispatch 返回冲突，旧 worker 不能覆盖新租约结果 | `server/src/agent-router/store.ts` |
 | Web/IM | Web 可创建、审批、取消和调度计划；IM 支持 `/route`、`/single`、`/approve`、`/reject`、`/cancel`，两者进入同一执行链 | `web/src/pages/ChatPage.tsx`、`server/src/im/` |
 
@@ -26,6 +26,7 @@
 - Router 子任务只接收任务说明和已完成的前置结果；计划、任务和事件均写入 SQLite，可在进程重启后依据租约恢复。
 - 取消会原子释放计划/任务租约并取消未开始任务；活跃 SDK 会收到 AbortSignal，租约续期失败也会中止旧 Worker 回合；已发生的外部副作用不承诺回滚。
 - 每个 Router 子任务带有 10 分钟运行上限；成员降权或撤销对话权限时，运行中的回合会被中止且不自动重试。
+- Router 计划会绑定创建时的 AgentProfile 内容指纹；身份提示内容发生变化时，已审批计划必须重新规划，避免继续执行旧配置。
 
 ## 后续演进顺序
 
