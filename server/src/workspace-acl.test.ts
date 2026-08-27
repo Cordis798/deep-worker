@@ -107,12 +107,15 @@ describe('workspace ACL', () => {
     );
     expect(revokeWorkspaceMember(db, 'admin', 'ws-1', 'admin')).toEqual({
       ok: false,
-      reason: 'last_admin',
+      reason: 'owner_protected',
     });
     expect(revokeWorkspaceMember(db, 'member', 'ws-1', 'outsider')).toEqual({
       ok: false,
       reason: 'forbidden',
     });
+    expect(addWorkspaceMember(db, 'admin', 'ws-1', 'admin', 'viewer')).toEqual({ ok: false, reason: 'owner_protected' });
+    expect(updateWorkspaceMember(db, 'admin', 'ws-1', 'admin', { role: 'viewer' })).toEqual({ ok: false, reason: 'owner_protected' });
+    expect(addWorkspaceMember(db, 'admin', 'ws-1', 'outsider', 'member', { jobRole: 'sales', capabilityPackage: 'operations' })).toEqual({ ok: false, reason: 'invalid_package' });
     db.close();
   });
 
@@ -126,7 +129,7 @@ describe('workspace ACL', () => {
     expect(getWorkspaceAccess(db, 'member', 'ws-1')?.role).toBe('viewer');
     expect(db.prepare('SELECT job_role, capability_package FROM workspace_members WHERE workspace_jid = ? AND user_id = ?').get('ws-1', 'member')).toEqual({ job_role: 'sales', capability_package: 'sales' });
     expect(updateWorkspaceMember(db, 'member', 'ws-1', 'viewer', { role: 'member' })).toEqual({ ok: false, reason: 'forbidden' });
-    expect(updateWorkspaceMember(db, 'admin', 'ws-1', 'admin', { role: 'viewer' })).toEqual({ ok: false, reason: 'last_admin' });
+    expect(updateWorkspaceMember(db, 'admin', 'ws-1', 'admin', { role: 'viewer' })).toEqual({ ok: false, reason: 'owner_protected' });
     db.close();
   });
 });

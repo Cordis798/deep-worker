@@ -124,6 +124,9 @@ export function createWorkspaceRoutes(db: Db) {
     if (!result.ok) {
       if (result.reason === 'forbidden') return c.json({ error: 'Workspace not found' }, 404);
       if (result.reason === 'user_not_found') return c.json({ error: 'User not found' }, 404);
+      if (result.reason === 'last_admin') return c.json({ error: '不能移除最后一名工作区管理员' }, 409);
+      if (result.reason === 'owner_protected') return c.json({ error: '工作区所有者必须保持管理员身份' }, 409);
+      if (result.reason === 'invalid_package') return c.json({ error: '能力包与岗位不匹配' }, 400);
       return c.json({ error: 'Workspace not found' }, 404);
     }
     return c.json({ success: true }, 201);
@@ -138,6 +141,7 @@ export function createWorkspaceRoutes(db: Db) {
     );
     if (!result.ok) {
       if (result.reason === 'last_admin') return c.json({ error: '不能移除最后一名工作区管理员' }, 409);
+      if (result.reason === 'owner_protected') return c.json({ error: '工作区所有者必须保持管理员身份' }, 409);
       return c.json({ error: 'Workspace member not found' }, 404);
     }
     return c.json({ success: true });
@@ -153,6 +157,8 @@ export function createWorkspaceRoutes(db: Db) {
     });
     if (!result.ok) {
       if (result.reason === 'last_admin') return c.json({ error: '不能移除最后一名工作区管理员' }, 409);
+      if (result.reason === 'owner_protected') return c.json({ error: '工作区所有者必须保持管理员身份' }, 409);
+      if (result.reason === 'invalid_package') return c.json({ error: '能力包与岗位不匹配' }, 400);
       return c.json({ error: 'Workspace member not found' }, 404);
     }
     return c.json({ success: true });

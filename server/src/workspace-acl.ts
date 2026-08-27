@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { WorkspaceRow } from './workspaces.js';
+import { getCapabilityPackage, type JobRole } from './capabilities/capability-governance.js';
 
 export type WorkspaceRole = 'workspace_admin' | 'member' | 'viewer';
 export type WorkspaceAction = 'view' | 'converse' | 'manage' | 'copy';
@@ -26,6 +27,17 @@ export interface WorkspaceMemberRow {
   created_at: string;
   updated_at: string;
   revoked_at: string | null;
+}
+
+function normalizeJobRole(value: string | undefined): JobRole {
+  return value === 'engineering' || value === 'operations' || value === 'sales' ? value : 'general';
+}
+
+function validCapabilityPackage(packageId: string | undefined, jobRole: string | undefined): boolean {
+  if (!packageId) return true;
+  const role = normalizeJobRole(jobRole);
+  const resolved = getCapabilityPackage(packageId, role);
+  return resolved.id === packageId && resolved.jobRole === role;
 }
 
 export function getWorkspaceAccess(
@@ -129,33 +141,37 @@ export function addWorkspaceMember(
   userId: string,
   role: WorkspaceRole,
   options: { jobRole?: WorkspaceMemberRow['job_role']; capabilityPackage?: string } = {},
-): { ok: boolean; reason?: 'forbidden' | 'workspace_not_found' | 'user_not_found' } {
+): { ok: boolean; reason?: 'forbidden' | 'workspace_not_found' | 'user_not_found' | 'last_admin' | 'owner_protected' | 'invalid_package' } {
   if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'manage')) {
     return { ok: false, reason: 'forbidden' };
   }
   const user = db.prepare("SELECT id FROM users WHERE id = ? AND status = 'active' AND deleted_at IS NULL").get(userId);
   if (!user) return { ok: false, reason: 'user_not_found' };
-  const now = new Date().toISOString();
-  db.prepare(
-    `INSERT INTO workspace_members (
-      workspace_jid, user_id, role, job_role, capability_package, status,
-      invited_by, created_at, updated_at, revoked_at
-    ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL)
-    ON CONFLICT(workspace_jid, user_id) DO UPDATE SET
-      role = excluded.role, job_role = excluded.job_role,
-      capability_package = excluded.capability_package, status = 'active',
-      invited_by = excluded.invited_by, updated_at = excluded.updated_at, revoked_at = NULL`,
-  ).run(
-    workspaceJid,
-    userId,
-    role,
-    options.jobRole ?? 'general',
-    options.capabilityPackage ?? options.jobRole ?? 'general',
-    actorUserId,
-    now,
-    now,
-  );
-  return { ok: true };
+  return db.transaction(() => {
+    const workspace = db.prepare('SELECT owner_user_id FROM workspaces WHERE jid = ? AND status = \'active\'').get(workspaceJid) as { owner_user_id: string | null } | undefined;
+    if (!workspace) return { ok: false as const, reason: 'workspace_not_found' as const };
+    const jobRole = normalizeJobRole(options.jobRole);
+    const packageId = options.capabilityPackage ?? jobRole;
+    if (!validCapabilityPackage(packageId, jobRole)) return { ok: false as const, reason: 'invalid_package' as const };
+    const current = db.prepare('SELECT role, status FROM workspace_members WHERE workspace_jid = ? AND user_id = ?').get(workspaceJid, userId) as { role: WorkspaceRole; status: string } | undefined;
+    if (current?.status === 'active' && current.role === 'workspace_admin' && role !== 'workspace_admin') {
+      if (workspace.owner_user_id === userId) return { ok: false as const, reason: 'owner_protected' as const };
+      const count = db.prepare("SELECT COUNT(*) AS count FROM workspace_members WHERE workspace_jid = ? AND role = 'workspace_admin' AND status = 'active'").get(workspaceJid) as { count: number };
+      if (count.count <= 1) return { ok: false as const, reason: 'last_admin' as const };
+    }
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO workspace_members (
+        workspace_jid, user_id, role, job_role, capability_package, status,
+        invited_by, created_at, updated_at, revoked_at
+      ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL)
+      ON CONFLICT(workspace_jid, user_id) DO UPDATE SET
+        role = excluded.role, job_role = excluded.job_role,
+        capability_package = excluded.capability_package, status = 'active',
+        invited_by = excluded.invited_by, updated_at = excluded.updated_at, revoked_at = NULL`,
+    ).run(workspaceJid, userId, role, jobRole, packageId, actorUserId, now, now);
+    return { ok: true as const };
+  }).exclusive();
 }
 
 export function revokeWorkspaceMember(
@@ -163,26 +179,24 @@ export function revokeWorkspaceMember(
   actorUserId: string,
   workspaceJid: string,
   userId: string,
-): { ok: boolean; reason?: 'forbidden' | 'not_found' | 'last_admin' } {
+): { ok: boolean; reason?: 'forbidden' | 'not_found' | 'last_admin' | 'owner_protected' } {
   if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'manage')) {
     return { ok: false, reason: 'forbidden' };
   }
-  const target = db
-    .prepare('SELECT role, status FROM workspace_members WHERE workspace_jid = ? AND user_id = ?')
-    .get(workspaceJid, userId) as { role: WorkspaceRole; status: string } | undefined;
-  if (!target || target.status !== 'active') return { ok: false, reason: 'not_found' };
-  if (target.role === 'workspace_admin') {
-    const count = db
-      .prepare("SELECT COUNT(*) AS count FROM workspace_members WHERE workspace_jid = ? AND role = 'workspace_admin' AND status = 'active'")
-      .get(workspaceJid) as { count: number };
-    if (count.count <= 1) return { ok: false, reason: 'last_admin' };
-  }
-  const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE workspace_members SET status = 'revoked', revoked_at = ?, updated_at = ?
-     WHERE workspace_jid = ? AND user_id = ?`,
-  ).run(now, now, workspaceJid, userId);
-  return { ok: true };
+  return db.transaction(() => {
+    const target = db.prepare('SELECT role, status FROM workspace_members WHERE workspace_jid = ? AND user_id = ?').get(workspaceJid, userId) as { role: WorkspaceRole; status: string } | undefined;
+    if (!target || target.status !== 'active') return { ok: false as const, reason: 'not_found' as const };
+    const workspace = db.prepare('SELECT owner_user_id FROM workspaces WHERE jid = ? AND status = \'active\'').get(workspaceJid) as { owner_user_id: string | null } | undefined;
+    if (workspace?.owner_user_id === userId) return { ok: false as const, reason: 'owner_protected' as const };
+    const now = new Date().toISOString();
+    const result = db.prepare(
+      `UPDATE workspace_members SET status = 'revoked', revoked_at = ?, updated_at = ?
+       WHERE workspace_jid = ? AND user_id = ? AND status = 'active'
+         AND NOT (role = 'workspace_admin' AND
+           (SELECT COUNT(*) FROM workspace_members WHERE workspace_jid = ? AND role = 'workspace_admin' AND status = 'active') <= 1)`,
+    ).run(now, now, workspaceJid, userId, workspaceJid);
+    return result.changes === 1 ? { ok: true as const } : { ok: false as const, reason: 'last_admin' as const };
+  }).exclusive();
 }
 
 export function updateWorkspaceMember(
@@ -191,24 +205,26 @@ export function updateWorkspaceMember(
   workspaceJid: string,
   userId: string,
   options: { role?: WorkspaceRole; jobRole?: WorkspaceMemberRow['job_role']; capabilityPackage?: string },
-): { ok: boolean; reason?: 'forbidden' | 'not_found' | 'last_admin' } {
+): { ok: boolean; reason?: 'forbidden' | 'not_found' | 'last_admin' | 'owner_protected' | 'invalid_package' } {
   if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'manage')) return { ok: false, reason: 'forbidden' };
   const target = db
-    .prepare('SELECT role, status FROM workspace_members WHERE workspace_jid = ? AND user_id = ?')
-    .get(workspaceJid, userId) as { role: WorkspaceRole; status: string } | undefined;
+    .prepare('SELECT role, status, job_role, capability_package FROM workspace_members WHERE workspace_jid = ? AND user_id = ?')
+    .get(workspaceJid, userId) as { role: WorkspaceRole; status: string; job_role: JobRole; capability_package: string } | undefined;
   if (!target || target.status !== 'active') return { ok: false, reason: 'not_found' };
-  if (target.role === 'workspace_admin' && options.role && options.role !== 'workspace_admin') {
-    const count = db
-      .prepare("SELECT COUNT(*) AS count FROM workspace_members WHERE workspace_jid = ? AND role = 'workspace_admin' AND status = 'active'")
-      .get(workspaceJid) as { count: number };
-    if (count.count <= 1) return { ok: false, reason: 'last_admin' };
-  }
-  const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE workspace_members
-     SET role = COALESCE(?, role), job_role = COALESCE(?, job_role),
-         capability_package = COALESCE(?, capability_package), updated_at = ?
-     WHERE workspace_jid = ? AND user_id = ? AND status = 'active'`,
-  ).run(options.role ?? null, options.jobRole ?? null, options.capabilityPackage ?? null, now, workspaceJid, userId);
-  return { ok: true };
+  const workspace = db.prepare('SELECT owner_user_id FROM workspaces WHERE jid = ? AND status = \'active\'').get(workspaceJid) as { owner_user_id: string | null } | undefined;
+  if (workspace?.owner_user_id === userId && options.role && options.role !== 'workspace_admin') return { ok: false, reason: 'owner_protected' };
+  const nextJobRole = normalizeJobRole(options.jobRole ?? target.job_role);
+  const nextPackage = options.capabilityPackage ?? (options.jobRole ? nextJobRole : target.capability_package);
+  if (!validCapabilityPackage(nextPackage, nextJobRole)) return { ok: false, reason: 'invalid_package' };
+  return db.transaction(() => {
+    const now = new Date().toISOString();
+    const result = db.prepare(
+      `UPDATE workspace_members
+       SET role = COALESCE(?, role), job_role = ?, capability_package = ?, updated_at = ?
+       WHERE workspace_jid = ? AND user_id = ? AND status = 'active'
+         AND NOT (role = 'workspace_admin' AND ? <> 'workspace_admin' AND
+           (SELECT COUNT(*) FROM workspace_members WHERE workspace_jid = ? AND role = 'workspace_admin' AND status = 'active') <= 1)`,
+    ).run(options.role ?? null, nextJobRole, nextPackage, now, workspaceJid, userId, options.role ?? target.role, workspaceJid);
+    return result.changes === 1 ? { ok: true as const } : { ok: false as const, reason: 'last_admin' as const };
+  }).exclusive();
 }
