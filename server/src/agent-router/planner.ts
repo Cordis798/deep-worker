@@ -13,6 +13,10 @@ function includesAny(text: string, tokens: string[]): boolean {
   return tokens.some((token) => normalized.includes(token.toLowerCase()));
 }
 
+function requestsParallelWork(text: string): boolean {
+  return includesAny(text, ['同时', '并行', '分别', '各自', 'in parallel', 'parallel']);
+}
+
 function candidateSupports(candidate: AgentRouterCandidate, required: string[]): boolean {
   if (required.length === 0) return true;
   const capabilities = new Set(candidate.capabilities.map((item) => item.toLowerCase()));
@@ -44,6 +48,7 @@ export function buildAgentRouterPlan(
   const taskRules = matchedRules.length > 1 && distinctMatches.size > 1
     ? matchedRules
     : [{ intent: inferred.intent, capabilities: inferred.requiredCapabilities, tokens: [], risk: 'read' as const }];
+  const parallel = requestsParallelWork(message) && taskRules.length > 1;
   for (const [ordinal, rule] of taskRules.entries()) {
     const candidate = choose(candidates, rule.capabilities, rule.intent);
     if (!candidate) continue;
@@ -54,7 +59,7 @@ export function buildAgentRouterPlan(
       title: `${candidate.name}：${rule.intent}`,
       requiredCapabilities: rule.capabilities,
       input: message,
-      dependsOn: ordinal === 0 ? [] : [ordinal - 1],
+      dependsOn: parallel ? [] : ordinal === 0 ? [] : [ordinal - 1],
       risk: rule.risk,
     });
   }
@@ -72,7 +77,9 @@ export function buildAgentRouterPlan(
     tasks,
     fallback: tasks.length > 0 ? 'single_agent' : 'reject',
     explanation: tasks.length > 1
-      ? `识别为跨岗位任务，按依赖顺序调度 ${tasks.length} 个 Agent`
+      ? parallel
+        ? `识别为跨岗位任务，并行调度 ${tasks.length} 个 Agent 后汇总结果`
+        : `识别为跨岗位任务，按依赖顺序调度 ${tasks.length} 个 Agent`
       : tasks.length === 1
         ? '未形成跨岗位依赖，回退为单 Agent 执行'
         : '没有满足能力与权限要求的 Agent',

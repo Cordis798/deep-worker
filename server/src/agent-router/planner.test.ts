@@ -27,4 +27,11 @@ describe('agent router planner', () => {
     expect(plan.tasks[0].requiredCapabilities).toEqual([]);
     expect(plan.risk).toBe('read');
   });
+
+  it('显式要求同时处理时生成无依赖子任务', () => {
+    const plan = buildAgentRouterPlan('请同时分析代码问题和发布监控', candidates);
+    expect(plan.tasks).toHaveLength(2);
+    expect(plan.tasks.every((task) => task.dependsOn.length === 0)).toBe(true);
+    expect(plan.explanation).toContain('并行调度');
+  });
 });

@@ -61,6 +61,19 @@ describe('agent router routes', () => {
     expect(result.result.tasks).toHaveLength(2);
     expect(result.result.tasks.every((task) => task.status === 'completed')).toBe(true);
 
+    const parallelPlanResponse = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '请同时分析代码问题和发布监控' }, cookie));
+    expect(parallelPlanResponse.status).toBe(201);
+    const parallelPlan = (await parallelPlanResponse.json()) as { plan: { id: string; route: { tasks: Array<{ dependsOn: number[] }> } } };
+    expect(parallelPlan.plan.route.tasks.every((task) => task.dependsOn.length === 0)).toBe(true);
+    expect((await app.request(`/api/workspaces/${jid}/router/plans/${parallelPlan.plan.id}/approve`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } })).status).toBe(200);
+    const parallelDispatch = await app.request(`/api/workspaces/${jid}/router/plans/${parallelPlan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
+    expect(parallelDispatch.status).toBe(200);
+    const parallelResult = (await parallelDispatch.json()) as { result: { status: string; tasks: Array<{ status: string }> } };
+    expect(parallelResult.result.status).toBe('completed');
+    expect(parallelResult.result.tasks.every((task) => task.status === 'completed')).toBe(true);
+    const parallelEvents = (await (await app.request(`/api/workspaces/${jid}/router/plans/${parallelPlan.plan.id}/events`, { headers: { cookie: `dw_session=${cookie}` } })).json()) as { events: Array<{ parallel?: boolean }> };
+    expect(parallelEvents.events.filter((event) => event.parallel).length).toBeGreaterThanOrEqual(4);
+
     const cancelledPlanResponse = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '请修复代码' }, cookie));
     const cancelledPlan = (await cancelledPlanResponse.json()) as { plan: { id: string } };
     const cancelled = await app.request(`/api/workspaces/${jid}/router/plans/${cancelledPlan.plan.id}/cancel`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });

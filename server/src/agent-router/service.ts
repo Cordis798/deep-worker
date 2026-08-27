@@ -43,6 +43,8 @@ export class RouterApprovalRequiredError extends Error {
   }
 }
 
+const MAX_PARALLEL_ROUTER_TASKS = 3;
+
 export class AgentRouterService {
   private readonly activeDispatches = new Map<string, AbortController>();
 
@@ -104,6 +106,9 @@ export class AgentRouterService {
       throw new RouterDispatchBusyError();
     }
     appendRouterEvent(this.db, plan.id, null, { type: 'plan_started', planId: plan.id });
+    if (tasks.length > 1 && tasks.every((task) => task.spec.dependsOn.length === 0)) {
+      return this.dispatchIndependentTasks(input, plan, tasks, workerId, abortController);
+    }
     const results: AgentRouterTaskResult[] = [];
     let failed = false;
     try {
@@ -179,6 +184,103 @@ export class AgentRouterService {
     } finally {
       this.activeDispatches.delete(plan.id);
     }
+  }
+
+  private async dispatchIndependentTasks(
+    input: { actorUserId: string; workspaceJid: string; planId: string },
+    plan: AgentRouterPlanRow,
+    tasks: AgentRouterTaskRow[],
+    workerId: string,
+    abortController: AbortController,
+  ): Promise<AgentRouterResult> {
+    const results: AgentRouterTaskResult[] = [];
+    for (let index = 0; index < tasks.length; index += MAX_PARALLEL_ROUTER_TASKS) {
+      if (abortController.signal.aborted) {
+        const current = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, plan.id) ?? plan;
+        return this.resultFromTasks(input, current, results);
+      }
+      const batch = tasks.slice(index, index + MAX_PARALLEL_ROUTER_TASKS);
+      const batchResults = await Promise.all(batch.map((task) => this.executeIndependentTask(input, task, workerId, abortController)));
+      results.push(...batchResults);
+      if (batchResults.some((result) => result.status === 'failed')) {
+        // Independent tasks do not block each other; continue the remaining batch.
+        continue;
+      }
+    }
+    const current = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, plan.id) ?? plan;
+    if (current.status === 'cancelled' || abortController.signal.aborted) return this.resultFromTasks(input, current, results);
+    const failed = results.some((result) => result.status === 'failed');
+    const result = this.resultFromTasks(input, current, results);
+    if (!setRouterPlanStatus(this.db, plan.id, failed ? 'failed' : 'completed', result, workerId)) throw new RouterDispatchBusyError();
+    appendRouterEvent(this.db, plan.id, null, { type: failed ? 'plan_failed' : 'plan_completed', planId: plan.id, parallel: true });
+    return result;
+  }
+
+  private async executeIndependentTask(
+    input: { actorUserId: string; workspaceJid: string; planId: string },
+    task: AgentRouterTaskRow,
+    workerId: string,
+    abortController: AbortController,
+  ): Promise<AgentRouterTaskResult> {
+    const existing = listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, input.planId)?.find((row) => row.id === task.id);
+    if (existing && ['completed', 'failed', 'skipped'].includes(existing.status)) return this.taskResult(existing);
+    if (!claimRouterTask(this.db, task.id, workerId)) {
+      const current = listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, input.planId)?.find((row) => row.id === task.id);
+      if (current && ['completed', 'failed', 'skipped'].includes(current.status)) return this.taskResult(current);
+      throw new RouterDispatchBusyError();
+    }
+    appendRouterEvent(this.db, input.planId, task.id, { type: 'task_started', ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, parallel: true });
+    let leaseLost = false;
+    const heartbeat = setInterval(() => {
+      if (!renewRouterPlan(this.db, input.planId, workerId) || !renewRouterTask(this.db, task.id, workerId)) leaseLost = true;
+    }, 30_000);
+    try {
+      const session = createAccessibleRuntimeSession(this.db, input.actorUserId, input.workspaceJid, {
+        name: `Router ${input.planId.slice(-8)} · ${task.spec.title}`,
+        agent_profile_id: task.spec.agentProfileId,
+      });
+      if (!session.ok || !session.id) throw new Error('无法创建子 Agent 会话');
+      const run = await this.runtime.submit({
+        ownerUserId: input.actorUserId,
+        workspaceJid: input.workspaceJid,
+        sessionId: session.id,
+        message: task.spec.input,
+        idempotencyKey: `router:${input.planId}:${task.id}`,
+        signal: abortController.signal,
+      });
+      if (abortController.signal.aborted || leaseLost) {
+        const currentPlan = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, input.planId);
+        if (currentPlan?.status !== 'cancelled') throw new RouterDispatchBusyError();
+        return this.taskResult(listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, input.planId)?.find((row) => row.id === task.id) ?? task);
+      }
+      if (!setRouterTaskStatus(this.db, task.id, 'completed', { text: run.reply ?? '' }, workerId)) throw new RouterDispatchBusyError();
+      appendRouterEvent(this.db, input.planId, task.id, { type: 'task_completed', ordinal: task.spec.ordinal, text: run.reply ?? '', parallel: true });
+      return { taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'completed', text: run.reply ?? '' };
+    } catch (error) {
+      if (error instanceof RouterDispatchBusyError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      const currentPlan = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, input.planId);
+      if (abortController.signal.aborted || currentPlan?.status === 'cancelled') {
+        const current = listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, input.planId)?.find((row) => row.id === task.id);
+        return this.taskResult(current ?? task);
+      }
+      if (leaseLost || !setRouterTaskStatus(this.db, task.id, 'failed', { error: message }, workerId)) throw new RouterDispatchBusyError();
+      appendRouterEvent(this.db, input.planId, task.id, { type: 'task_failed', ordinal: task.spec.ordinal, error: message, parallel: true });
+      return { taskId: task.id, ordinal: task.spec.ordinal, agentProfileId: task.spec.agentProfileId, status: 'failed', text: null, error: message };
+    } finally {
+      clearInterval(heartbeat);
+    }
+  }
+
+  private taskResult(task: AgentRouterTaskRow): AgentRouterTaskResult {
+    return {
+      taskId: task.id,
+      ordinal: task.spec.ordinal,
+      agentProfileId: task.spec.agentProfileId,
+      status: task.status,
+      text: task.resultText,
+      ...(task.error ? { error: task.error } : {}),
+    };
   }
 
   private candidates(actorUserId: string, workspaceJid: string): AgentBindingRow[] {
