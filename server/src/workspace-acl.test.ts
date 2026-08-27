@@ -6,6 +6,7 @@ import {
   listAccessibleWorkspaces,
   type WorkspaceAction,
 } from './workspace-acl.js';
+import { createWorkspace } from './workspaces.js';
 
 function fixture() {
   const db = initDatabase(':memory:');
@@ -67,6 +68,18 @@ describe('workspace ACL', () => {
     });
     expect(getWorkspaceAccess(db, 'outsider', 'ws-1')).toBeUndefined();
     expect(listAccessibleWorkspaces(db, 'viewer').map((row) => row.jid)).toEqual(['ws-1']);
+    db.close();
+  });
+
+  it('adds the creator as a workspace administrator at creation time', () => {
+    const db = fixture();
+    const row = createWorkspace(db, 'admin', { name: '新工作区' });
+    expect(row).toBeTruthy();
+    expect(
+      db
+        .prepare('SELECT role, status FROM workspace_members WHERE workspace_jid = ? AND user_id = ?')
+        .get(row!.jid, 'admin'),
+    ).toEqual({ role: 'workspace_admin', status: 'active' });
     db.close();
   });
 });

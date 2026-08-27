@@ -99,6 +99,11 @@ export function createWorkspace(
     now,
     now,
   );
+  db.prepare(
+    `INSERT OR IGNORE INTO workspace_members (
+      workspace_jid, user_id, role, status, invited_by, created_at, updated_at
+    ) VALUES (?, ?, 'workspace_admin', 'active', ?, ?, ?)`,
+  ).run(jid, ownerUserId, ownerUserId, now, now);
   return getWorkspaceById(db, jid)!;
 }
 
