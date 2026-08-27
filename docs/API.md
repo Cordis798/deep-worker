@@ -15,6 +15,9 @@
 - `/api/agent-profiles/*`：Agent Profile、Prompt 版本和恢复。
 - `/api/workspaces/*`：Workspace、Runtime Session 和归属校验。
 - `/api/workspaces/:jid/runtime-sessions/:sessionId/messages`：提交 Agent 消息并返回持久化流事件。
+- `/api/workspaces/:jid/router/plans`：创建、查询能力感知编排计划。
+- `/api/workspaces/:jid/router/plans/:planId/approve`、`/reject`、`/cancel`、`/dispatch`：审批、拒绝、取消或执行编排计划；高风险计划必须先审批。
+- `/api/workspaces/:jid/router/plans/:planId/events`：查询编排审计事件。
 - `/api/workspaces/:jid/runtime-sessions/:sessionId/turns/:turnId/events`：WebSocket 流式事件。
 - `/api/workspaces/:jid/files/*`、`/api/workspaces/:jid/terminal/*`：文件和终端。
 - `/api/tasks/*`：定时任务、运行历史、停止和恢复。
