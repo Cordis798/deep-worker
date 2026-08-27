@@ -119,6 +119,12 @@ describe('sqlite migration framework', () => {
     expect(
       db.prepare("SELECT 1 FROM pragma_table_info('runtime_sessions') WHERE name = 'context_status'").get(),
     ).toBeTruthy();
+    expect(
+      db.prepare("SELECT 1 FROM pragma_table_info('agent_router_plans') WHERE name = 'dispatch_owner'").get(),
+    ).toBeTruthy();
+    expect(
+      db.prepare("SELECT 1 FROM pragma_table_info('agent_router_plans') WHERE name = 'dispatch_lease_expires_at'").get(),
+    ).toBeTruthy();
     db.close();
   });
 
