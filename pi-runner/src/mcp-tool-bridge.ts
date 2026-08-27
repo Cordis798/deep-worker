@@ -48,7 +48,7 @@ function jsonSchema(value: unknown): Record<string, unknown> {
     return { type: 'object', properties: {} };
   }
   const schema = value as Record<string, unknown>;
-  return schema.type === 'object' ? schema : { type: 'object', properties: {} };
+  return { type: 'object', ...schema };
 }
 
 function textContent(value: unknown): Array<{ type: 'text'; text: string }> {
@@ -105,12 +105,18 @@ class JsonRpcMcpClient {
     if (signal?.aborted) throw new McpToolBridgeError('MCP_TOOL_ABORTED', 'MCP 工具执行已取消');
     const request = this.request('tools/call', { name, arguments: argumentsValue });
     if (!signal) return request;
-    return Promise.race([
-      request,
-      new Promise<never>((_resolve, reject) => {
-        signal.addEventListener('abort', () => reject(new McpToolBridgeError('MCP_TOOL_ABORTED', 'MCP 工具执行已取消')), { once: true });
-      }),
-    ]);
+    let abortHandler: (() => void) | undefined;
+    try {
+      return await Promise.race([
+        request,
+        new Promise<never>((_resolve, reject) => {
+          abortHandler = () => reject(new McpToolBridgeError('MCP_TOOL_ABORTED', 'MCP 工具执行已取消'));
+          signal.addEventListener('abort', abortHandler, { once: true });
+        }),
+      ]);
+    } finally {
+      if (abortHandler) signal.removeEventListener('abort', abortHandler);
+    }
   }
 
   async close(): Promise<void> {
@@ -178,6 +184,7 @@ class StdioMcpTransport implements McpTransport {
     this.process = null;
     this.rejectAll(new Error('MCP stdio 已关闭'));
     if (!child) return;
+    if (child.exitCode !== null) return;
     child.kill();
     await new Promise<void>((resolve) => child.once('exit', () => resolve()));
   }
@@ -217,7 +224,7 @@ class HttpMcpTransport implements McpTransport {
   private nextId = 0;
   private connected = false;
 
-  constructor(private readonly options: { url: string; headers?: Record<string, string> }) {}
+  constructor(private readonly options: { url: string; headers?: Record<string, string>; requestTimeoutMs?: number }) {}
 
   async connect(): Promise<void> {
     this.connected = true;
@@ -225,13 +232,23 @@ class HttpMcpTransport implements McpTransport {
 
   async request(method: string, params?: unknown): Promise<unknown> {
     if (!this.connected) throw new McpToolBridgeError('MCP_NOT_CONNECTED', 'MCP HTTP 未连接');
-    const response = await fetch(this.options.url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...this.options.headers },
-      body: JSON.stringify({ jsonrpc: '2.0', id: ++this.nextId, method, params }),
-    });
-    if (!response.ok) throw new McpToolBridgeError('MCP_REQUEST_FAILED', `MCP HTTP 请求失败：${response.status}`);
-    return response.json();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.options.requestTimeoutMs ?? 30_000);
+    try {
+      const response = await fetch(this.options.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...this.options.headers },
+        body: JSON.stringify({ jsonrpc: '2.0', id: ++this.nextId, method, params }),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new McpToolBridgeError('MCP_REQUEST_FAILED', `MCP HTTP 请求失败：${response.status}`);
+      return response.json();
+    } catch (error) {
+      if (controller.signal.aborted) throw new McpToolBridgeError('MCP_REQUEST_TIMEOUT', `MCP 请求超时：${method}`);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async close(): Promise<void> {
