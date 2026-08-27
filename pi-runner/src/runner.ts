@@ -7,6 +7,10 @@ import { mapPiEvent } from './stream-events.js';
 import type { RpcEvent } from './rpc-types.js';
 import type { PiCapabilityInjection } from './capability-injection.js';
 import type { PiProviderModelConfig } from './provider-config.js';
+import type { AgentRuntime, RuntimeResult, RuntimeSession } from './runtime.js';
+import { PiSdkRuntimeAdapter } from './pi-sdk-runtime.js';
+import { RuntimeSessionManager } from './runtime-session-manager.js';
+import { mapRuntimeEvent } from './runtime-stream-events.js';
 
 export interface AgentRunRequest {
   ownerUserId?: string;
@@ -55,16 +59,25 @@ export interface PiRunnerOptions {
   baseDir: string;
   queueOptions?: SessionQueueOptions;
   sessionManager?: PiSessionManager;
+  runtime?: AgentRuntime;
 }
 
 /** 基于 Pi 的智能体运行器，按会话串行执行并限制重试次数。 */
 export class PiRunner implements AgentRunner {
-  private readonly sessions: PiSessionManager;
+  private readonly legacySessions?: PiSessionManager;
+  private readonly runtimeSessions?: RuntimeSessionManager;
   private readonly queue: SessionQueue;
 
   constructor(options: PiRunnerOptions) {
-    this.sessions =
-      options.sessionManager ?? new PiSessionManager({ baseDir: options.baseDir });
+    if (options.runtime || !options.sessionManager) {
+      this.runtimeSessions = new RuntimeSessionManager({
+        baseDir: options.baseDir,
+        runtime: options.runtime ?? new PiSdkRuntimeAdapter(),
+      });
+    } else {
+      // Explicit injection keeps the old client seam available for compatibility tests only.
+      this.legacySessions = options.sessionManager;
+    }
     this.queue = new SessionQueue(options.queueOptions);
   }
 
@@ -77,10 +90,109 @@ export class PiRunner implements AgentRunner {
 
   async close(): Promise<void> {
     this.queue.close();
-    await this.sessions.closeAll();
+    await this.runtimeSessions?.closeAll();
+    await this.legacySessions?.closeAll();
   }
 
   private async runOnce(
+    request: AgentRunRequest,
+    onEvent?: AgentEventListener,
+  ): Promise<AgentRunResult> {
+    if (this.runtimeSessions) return this.runSdkOnce(request, onEvent);
+    return this.runLegacyOnce(request, onEvent);
+  }
+
+  private async runSdkOnce(
+    request: AgentRunRequest,
+    onEvent?: AgentEventListener,
+  ): Promise<AgentRunResult> {
+    const prompt = assemblePrompt({
+      history: request.history,
+      currentMessage: request.message,
+      outputContract: request.outputContract ?? 'Return the final answer only.',
+      capabilities: request.capabilities
+        ? {
+            hash: request.capabilities.hash,
+            skills: request.capabilities.skills.map((skill) => skill.name),
+            mcpServers: request.capabilities.mcpServers.map((server) => server.name),
+            plugins: request.capabilities.plugins
+              .filter((plugin) => plugin.enabled)
+              .map((plugin) => plugin.name),
+          }
+        : undefined,
+    });
+    const events: StreamEvent[] = [];
+    try {
+      const result = await this.runtimeSessions!.withSession(
+        {
+          sessionId: request.sessionId,
+          cwd: request.cwd,
+          sessionDir: request.sessionDir,
+          sessionFile: request.sessionFile,
+          identityHash: request.identityHash,
+          capabilityHash: request.capabilityHash,
+          providerHash: request.provider?.hash,
+          systemPrompt: request.systemPrompt,
+          provider: request.provider,
+          capabilities: request.capabilities,
+          allowedTools: ['bash'],
+        },
+        async (session) => {
+          const unsubscribe = session.subscribe((runtimeEvent) => {
+            for (const event of mapRuntimeEvent(runtimeEvent, {
+              sessionId: request.sessionId,
+              turnId: request.turnId,
+              queryRunId: request.queryRunId,
+            })) {
+              events.push(event);
+              onEvent?.(event);
+            }
+          });
+          try {
+            return await this.promptSdkSession(session, prompt, request.timeoutMs);
+          } finally {
+            unsubscribe();
+          }
+        },
+      );
+      if (result.finalizationReason === 'error') {
+        throw new Error(result.error ?? `Pi SDK stopped with ${result.stopReason ?? 'error'}`);
+      }
+      return {
+        sessionId: request.sessionId,
+        reply: result.text,
+        events,
+        attempts: 1,
+      };
+    } catch (error) {
+      await this.runtimeSessions!.invalidate(request.sessionId);
+      throw error;
+    }
+  }
+
+  private async promptSdkSession(
+    session: RuntimeSession,
+    prompt: string,
+    timeoutMs?: number,
+  ): Promise<RuntimeResult> {
+    if (!timeoutMs) return session.prompt({ text: prompt });
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        session.prompt({ text: prompt }),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            void session.abort().catch(() => undefined);
+            reject(new Error(`Pi SDK prompt timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  private async runLegacyOnce(
     request: AgentRunRequest,
     onEvent?: AgentEventListener,
   ): Promise<AgentRunResult> {
@@ -116,7 +228,7 @@ export class PiRunner implements AgentRunner {
     const events: StreamEvent[] = [];
     try {
       let reply = '';
-      await this.sessions.withSession(config, async (client) => {
+      await this.legacySessions!.withSession(config, async (client) => {
         if (!client.promptAndWait) {
           throw new Error('Pi session client does not support promptAndWait');
         }
@@ -145,7 +257,7 @@ export class PiRunner implements AgentRunner {
       });
       return { sessionId: request.sessionId, reply, events, attempts: 1 };
     } catch (error) {
-      await this.sessions.invalidate(request.sessionId);
+      await this.legacySessions!.invalidate(request.sessionId);
       throw error;
     }
   }

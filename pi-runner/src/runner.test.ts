@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PiRunner, type AgentRunRequest } from './runner.js';
 import { PiSessionManager, type SessionClient } from './session-manager.js';
+import type { AgentRuntime, RuntimeEventListener, RuntimeSession } from './runtime.js';
 
 class FakeClient implements SessionClient {
   readonly prompts: string[] = [];
@@ -35,6 +36,60 @@ class FakeClient implements SessionClient {
 }
 
 describe('PiRunner', () => {
+  it('runs normal conversations through the direct SDK runtime', async () => {
+    const listeners = new Set<RuntimeEventListener>();
+    const session: RuntimeSession = {
+      sessionId: 'sdk-session',
+      isStreaming: false,
+      subscribe(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async prompt() {
+        for (const listener of listeners) {
+          listener({ type: 'text_delta', sessionId: 'sdk-session', delta: 'sdk' });
+        }
+        const result = {
+          text: 'sdk reply',
+          sessionId: 'sdk-session',
+          finalizationReason: 'completed' as const,
+          usage: { inputTokens: 2, outputTokens: 3 },
+        };
+        for (const listener of listeners) {
+          listener({ type: 'result', sessionId: 'sdk-session', result });
+        }
+        return result;
+      },
+      async steer() {
+        throw new Error('not used');
+      },
+      async followUp() {
+        throw new Error('not used');
+      },
+      async abort() {},
+      async compact() {},
+      dispose() {},
+    };
+    const runtime: AgentRuntime = {
+      kind: 'pi',
+      createSession: async () => session,
+      close: async () => undefined,
+    };
+    const runner = new PiRunner({ baseDir: 'C:\\tmp\\sdk-runner-test', runtime });
+    const events: Array<{ eventType: string; text?: string }> = [];
+
+    await expect(
+      runner.run({ sessionId: 's1', message: 'current' }, (event) => events.push(event)),
+    ).resolves.toMatchObject({ reply: 'sdk reply', attempts: 1 });
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ eventType: 'text_delta', text: 'sdk' }),
+        expect.objectContaining({ eventType: 'usage' }),
+      ]),
+    );
+    await runner.close();
+  });
+
   it('assembles prompts, maps events and returns the final reply', async () => {
     const client = new FakeClient();
     const manager = new PiSessionManager({
