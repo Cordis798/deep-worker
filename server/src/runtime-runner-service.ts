@@ -15,7 +15,7 @@ import { mapProviderToPiProvider, ProviderPool } from './provider-pool.js';
 import { runnerLifecycle } from './runner-lifecycle.js';
 import { checkBillingAccess } from './billing.js';
 import { recordUsageEvent } from './usage-service.js';
-import { resolveCapabilitiesForWorkspace, type CapabilityManifest } from './capabilities/capability-resolver.js';
+import { restrictCapabilityManifestForTask, resolveCapabilitiesForWorkspace, type CapabilityManifest } from './capabilities/capability-resolver.js';
 import {
   appendRunnerOutboxEvent,
   claimRunnerTurn,
@@ -45,6 +45,7 @@ export interface RuntimeRunnerMessageInput {
   outputContract?: string;
   timeoutMs?: number;
   capabilities?: AgentRunRequest['capabilities'];
+  capabilityScope?: readonly string[];
   signal?: AbortSignal;
 }
 
@@ -172,6 +173,7 @@ export class RuntimeRunnerService {
         outputContract: input.outputContract,
         timeoutMs: input.timeoutMs,
         capabilities: input.capabilities,
+        capabilityScope: input.capabilityScope,
         signal: input.signal,
       }),
     );
@@ -196,7 +198,7 @@ export class RuntimeRunnerService {
 
   private async processTurn(
     turnId: string,
-    options: { systemPrompt?: string; outputContract?: string; timeoutMs?: number; capabilities?: AgentRunRequest['capabilities']; signal?: AbortSignal },
+    options: { systemPrompt?: string; outputContract?: string; timeoutMs?: number; capabilities?: AgentRunRequest['capabilities']; capabilityScope?: readonly string[]; signal?: AbortSignal },
   ): Promise<RuntimeRunnerResult> {
     const first = getRunnerTurnById(this.db, turnId);
     if (!first) throw new Error('Runner turn not found');
@@ -242,7 +244,12 @@ export class RuntimeRunnerService {
         }
         usageAgentId = session.agent_profile_id;
         const capabilities = options.capabilities ?? toPiCapabilityInjection(
-          resolveCapabilitiesForWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid),
+          options.capabilityScope?.length
+            ? restrictCapabilityManifestForTask(
+                resolveCapabilitiesForWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid),
+                options.capabilityScope,
+              )
+            : resolveCapabilitiesForWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid),
         );
         selectedProviderPool = this.getProviderPool(principalUserId);
         const selectedProvider = selectedProviderPool?.selectProvider(inbox.sessionId);

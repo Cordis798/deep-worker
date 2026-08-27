@@ -5,6 +5,7 @@ import { listMcpServers, listMcpServersForRuntime, type McpRuntimeServerRow, typ
 import { listPlugins, type PluginRow } from './plugin-catalog.js';
 import {
   isCapabilityAllowed,
+  isTaskResourceAllowed,
   resolveCapabilityGovernance,
   type CapabilityGovernance,
 } from './capability-governance.js';
@@ -304,6 +305,26 @@ export function applyCapabilityGovernance(
     skills: manifest.skills,
     mcp: manifest.mcp,
     plugins: manifest.plugins,
+  };
+  return { ...withoutHash, hash: computeHash(withoutHash) };
+}
+
+export function restrictCapabilityManifestForTask(
+  manifest: CapabilityManifest,
+  taskCapabilities: readonly string[],
+): CapabilityManifest {
+  const mcp = {
+    selected: manifest.mcp.selected.filter((server) => isTaskResourceAllowed(taskCapabilities, 'mcp', server.name)),
+  };
+  const plugins = {
+    selected: manifest.plugins.selected.filter((plugin) => isTaskResourceAllowed(taskCapabilities, 'plugin', plugin.name)),
+  };
+  const withoutHash = {
+    schemaVersion: 1 as const,
+    ...(manifest.governance ? { governance: manifest.governance } : {}),
+    skills: manifest.skills,
+    mcp,
+    plugins,
   };
   return { ...withoutHash, hash: computeHash(withoutHash) };
 }

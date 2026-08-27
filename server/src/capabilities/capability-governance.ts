@@ -3,6 +3,17 @@ import crypto from 'node:crypto';
 export type JobRole = 'general' | 'engineering' | 'operations' | 'sales';
 export type GovernedResource = 'skill' | 'mcp' | 'plugin';
 
+const TASK_RESOURCE_ALIASES: Record<string, Partial<Record<Exclude<GovernedResource, 'skill'>, string[]>>> = {
+  code: { mcp: ['git', 'github'], plugin: ['code-review', 'ci'] },
+  git: { mcp: ['git', 'github'] },
+  test: { plugin: ['ci'] },
+  deploy: { mcp: ['release'], plugin: ['release'] },
+  monitor: { mcp: ['monitoring'] },
+  logs: { mcp: ['logs'] },
+  crm: { mcp: ['crm'], plugin: ['crm'] },
+  email: { mcp: ['email'], plugin: ['mail'] },
+};
+
 export interface CapabilityPackage {
   id: string;
   jobRole: JobRole;
@@ -131,6 +142,17 @@ export function isTaskCapabilityAllowed(governance: CapabilityGovernance, capabi
   const normalized = capability.trim().toLowerCase();
   if (!normalized) return false;
   return governance.taskCapabilities.some((item) => item === '*' || item.toLowerCase() === normalized);
+}
+
+export function isTaskResourceAllowed(taskCapabilities: readonly string[], resource: Exclude<GovernedResource, 'skill'>, name: string): boolean {
+  const normalizedName = name.trim().toLowerCase();
+  if (!normalizedName) return false;
+  return taskCapabilities.some((capability) => {
+    const normalized = capability.trim().toLowerCase();
+    if (normalized === '*') return true;
+    if (normalized === normalizedName) return true;
+    return (TASK_RESOURCE_ALIASES[normalized]?.[resource] ?? []).some((alias) => alias.toLowerCase() === normalizedName);
+  });
 }
 
 export function isCapabilityAllowed(

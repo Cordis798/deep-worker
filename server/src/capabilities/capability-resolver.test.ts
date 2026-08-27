@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCapabilityGovernance, resolveCapabilitiesForWorkspace, resolveCapabilitiesFromDatabase, resolveEffectiveCapabilities, trimCapabilityManifest, type SkillCandidate } from './capability-resolver.js';
+import { applyCapabilityGovernance, resolveCapabilitiesForWorkspace, resolveCapabilitiesFromDatabase, resolveEffectiveCapabilities, restrictCapabilityManifestForTask, trimCapabilityManifest, type SkillCandidate } from './capability-resolver.js';
 import { resolveCapabilityGovernance } from './capability-governance.js';
 import { initDatabase } from '../db/migration.js';
 import { createWorkspace } from '../workspaces.js';
@@ -45,6 +45,25 @@ describe('生效能力解析', () => {
     expect(trimmed.mcp.selected).toHaveLength(0);
     expect(trimmed.plugins.selected).toHaveLength(0);
     expect(trimmed.hash).not.toBe(manifest.hash);
+  });
+
+  it('按路由任务能力裁剪运行时工具，避免注入整个工作区清单', () => {
+    const manifest = resolveEffectiveCapabilities({
+      skills: [skill({ id: 'one', name: 'one', scope: 'user' })],
+      mcpServers: [
+        { id: 'git', name: 'git', enabled: true, transport: 'http' },
+        { id: 'release', name: 'release', enabled: true, transport: 'http' },
+      ],
+      plugins: [
+        { id: 'ci', name: 'ci', version: '1.0.0', enabled: true },
+        { id: 'incident', name: 'incident', version: '1.0.0', enabled: true },
+      ],
+    });
+    const scoped = restrictCapabilityManifestForTask(manifest, ['code']);
+    expect(scoped.skills.selected).toHaveLength(1);
+    expect(scoped.mcp.selected.map((item) => item.name)).toEqual(['git']);
+    expect(scoped.plugins.selected.map((item) => item.name)).toEqual(['ci']);
+    expect(scoped.hash).not.toBe(manifest.hash);
   });
 
   it('在能力解析后执行岗位能力包的冲突与越权检查', () => {
