@@ -466,10 +466,15 @@ export function claimRouterTask(db: Db, taskId: string, workerId: string, leaseM
   return db.prepare(
     `UPDATE agent_router_tasks
      SET status = 'running', attempt = attempt + 1, lease_owner = ?, lease_expires_at = ?, updated_at = ?
-     WHERE id = ? AND status IN ('queued', 'running') AND (
+     WHERE id = ? AND status IN ('queued', 'running')
+       AND EXISTS (
+         SELECT 1 FROM agent_router_plans p
+         WHERE p.id = agent_router_tasks.plan_id AND p.status = 'running'
+           AND p.dispatch_owner = ? AND p.dispatch_lease_expires_at > ?
+       ) AND (
        lease_owner IS NULL OR lease_expires_at IS NULL OR lease_expires_at <= ? OR lease_owner = ?
      )`,
-  ).run(workerId, expiresAt, nowIso, taskId, nowIso, workerId).changes === 1;
+  ).run(workerId, expiresAt, nowIso, taskId, workerId, nowIso, nowIso, workerId).changes === 1;
 }
 
 export function renewRouterTask(db: Db, taskId: string, workerId: string, leaseMs = DEFAULT_ROUTER_LEASE_MS): boolean {
@@ -477,8 +482,13 @@ export function renewRouterTask(db: Db, taskId: string, workerId: string, leaseM
   return db.prepare(
     `UPDATE agent_router_tasks
      SET lease_expires_at = ?, updated_at = ?
-     WHERE id = ? AND status = 'running' AND lease_owner = ? AND lease_expires_at > ?`,
-  ).run(new Date(now.getTime() + leaseMs).toISOString(), now.toISOString(), taskId, workerId, now.toISOString()).changes === 1;
+     WHERE id = ? AND status = 'running' AND lease_owner = ? AND lease_expires_at > ?
+       AND EXISTS (
+         SELECT 1 FROM agent_router_plans p
+         WHERE p.id = agent_router_tasks.plan_id AND p.status = 'running'
+           AND p.dispatch_owner = ? AND p.dispatch_lease_expires_at > ?
+       )`,
+  ).run(new Date(now.getTime() + leaseMs).toISOString(), now.toISOString(), taskId, workerId, now.toISOString(), workerId, now.toISOString()).changes === 1;
 }
 
 export function skipRouterTask(db: Db, taskId: string, workerId: string, error: string): boolean {

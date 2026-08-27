@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { initDatabase } from '../db/migration.js';
-import { setRouterTaskStatus } from './store.js';
+import { claimRouterTask, renewRouterTask, setRouterTaskStatus } from './store.js';
 
 describe('agent router task lease fencing', () => {
   let db: ReturnType<typeof initDatabase> | undefined;
@@ -61,5 +61,20 @@ describe('agent router task lease fencing', () => {
 
     expect(setRouterTaskStatus(db, taskId, 'completed', { text: 'stale' }, userId)).toBe(false);
     expect((db.prepare('SELECT status, result_json FROM agent_router_tasks WHERE id = ?').get(taskId) as { status: string; result_json: string | null })).toEqual({ status: 'running', result_json: '{"text":"ok"}' });
+
+    db.prepare(
+      `UPDATE agent_router_tasks SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL WHERE id = ?`,
+    ).run(taskId);
+    expect(claimRouterTask(db, taskId, userId)).toBe(false);
+    db.prepare(
+      `UPDATE agent_router_plans SET dispatch_lease_expires_at = ? WHERE id = ?`,
+    ).run(leaseExpiresAt, planId);
+    expect(claimRouterTask(db, taskId, userId)).toBe(true);
+    const claimed = db.prepare('SELECT lease_expires_at FROM agent_router_tasks WHERE id = ?').get(taskId) as { lease_expires_at: string };
+    db.prepare(
+      `UPDATE agent_router_plans SET dispatch_lease_expires_at = ? WHERE id = ?`,
+    ).run(new Date(now.getTime() - 1_000).toISOString(), planId);
+    expect(renewRouterTask(db, taskId, userId)).toBe(false);
+    expect((db.prepare('SELECT lease_expires_at FROM agent_router_tasks WHERE id = ?').get(taskId) as { lease_expires_at: string }).lease_expires_at).toBe(claimed.lease_expires_at);
   });
 });

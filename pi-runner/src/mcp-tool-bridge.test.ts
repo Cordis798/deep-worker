@@ -20,7 +20,7 @@ describe('Pi MCP 工具桥接', () => {
     expect(tool.name).toBe('mcp_data_api_lookup');
     const result = await tool.execute('call-1', { key: 'id-1' }, undefined, undefined, {});
     expect(result.content[0].text).toContain('value:');
-    expect(requests.map((request) => request.method)).toEqual(['initialize', 'tools/list', 'tools/call']);
+    expect(requests.map((request) => request.method)).toEqual(['initialize', 'notifications/initialized', 'tools/list', 'tools/call']);
     await bridge!.close();
   });
 
@@ -33,6 +33,48 @@ describe('Pi MCP 工具桥接', () => {
     }));
     const bridge = await createMcpToolBridge([{ id: 'mcp-2', name: 'ops', transport: 'http', url: 'https://example.test' }]);
     await expect((bridge!.tools[0] as any).execute('call-2', {}, undefined, undefined, {})).rejects.toMatchObject({ code: 'MCP_TOOL_FAILED' });
+    await bridge!.close();
+  });
+
+  it('调用前取消不会发起 MCP 工具请求', async () => {
+    const methods: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { method?: string };
+      methods.push(body.method ?? '');
+      if (body.method === 'initialize') return { ok: true, json: async () => ({ result: {} }) };
+      if (body.method === 'tools/list') return { ok: true, json: async () => ({ result: { tools: [{ name: 'lookup' }] } }) };
+      return { ok: true, json: async () => ({ result: { content: [{ type: 'text', text: 'unexpected' }] } }) };
+    }));
+    const bridge = await createMcpToolBridge([{ id: 'mcp-abort-before', name: 'data-api', transport: 'http', url: 'https://example.test' }]);
+    const controller = new AbortController();
+    controller.abort();
+    await expect((bridge!.tools[0] as any).execute('call-abort-before', {}, controller.signal, undefined, {})).rejects.toMatchObject({ code: 'MCP_TOOL_ABORTED' });
+    expect(methods).not.toContain('tools/call');
+    await bridge!.close();
+  });
+
+  it('执行中取消会中止底层 HTTP 请求', async () => {
+    let callStarted!: () => void;
+    const started = new Promise<void>((resolve) => { callStarted = resolve; });
+    let observedSignal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { method?: string };
+      if (body.method === 'initialize') return Promise.resolve({ ok: true, json: async () => ({ result: {} }) });
+      if (body.method === 'tools/list') return Promise.resolve({ ok: true, json: async () => ({ result: { tools: [{ name: 'lookup' }] } }) });
+      if (body.method !== 'tools/call') return Promise.resolve({ ok: true, json: async () => ({}) });
+      observedSignal = init?.signal ?? undefined;
+      callStarted();
+      return new Promise((_resolve, reject) => {
+        observedSignal?.addEventListener('abort', () => reject(new Error('fetch aborted')), { once: true });
+      });
+    }));
+    const bridge = await createMcpToolBridge([{ id: 'mcp-abort-during', name: 'data-api', transport: 'http', url: 'https://example.test' }]);
+    const controller = new AbortController();
+    const pending = (bridge!.tools[0] as any).execute('call-abort-during', {}, controller.signal, undefined, {});
+    await started;
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'MCP_TOOL_ABORTED' });
+    expect(observedSignal?.aborted).toBe(true);
     await bridge!.close();
   });
 });
