@@ -313,6 +313,33 @@ export function restrictCapabilityManifestForTask(
   manifest: CapabilityManifest,
   taskCapabilities: readonly string[],
 ): CapabilityManifest {
+  const allowedSkillNames = new Set(
+    manifest.skills.selected
+      .filter((skill) => isTaskResourceAllowed(taskCapabilities, 'skill', skill.name))
+      .map((skill) => skill.name),
+  );
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const skill of manifest.skills.selected) {
+      if (!allowedSkillNames.has(skill.name)) continue;
+      for (const dependency of skill.dependencies) {
+        if (!allowedSkillNames.has(dependency) && manifest.skills.selected.some((candidate) => candidate.name === dependency)) {
+          allowedSkillNames.add(dependency);
+          changed = true;
+        }
+      }
+    }
+  }
+  const selectedSkills = manifest.skills.selected.filter((skill) => allowedSkillNames.has(skill.name));
+  const skills = {
+    selected: selectedSkills,
+    candidates: manifest.skills.candidates.map((candidate) => {
+      if (!candidate.selected || allowedSkillNames.has(candidate.name)) return candidate;
+      return { ...candidate, selected: false, excludedReason: 'profile_filtered' as const };
+    }),
+    conflicts: manifest.skills.conflicts.filter((name) => allowedSkillNames.has(name)),
+  };
   const mcp = {
     selected: manifest.mcp.selected.filter((server) => isTaskResourceAllowed(taskCapabilities, 'mcp', server.name)),
   };
@@ -322,7 +349,7 @@ export function restrictCapabilityManifestForTask(
   const withoutHash = {
     schemaVersion: 1 as const,
     ...(manifest.governance ? { governance: manifest.governance } : {}),
-    skills: manifest.skills,
+    skills,
     mcp,
     plugins,
   };

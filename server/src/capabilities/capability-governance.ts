@@ -3,15 +3,15 @@ import crypto from 'node:crypto';
 export type JobRole = 'general' | 'engineering' | 'operations' | 'sales';
 export type GovernedResource = 'skill' | 'mcp' | 'plugin';
 
-const TASK_RESOURCE_ALIASES: Record<string, Partial<Record<Exclude<GovernedResource, 'skill'>, string[]>>> = {
-  code: { mcp: ['git', 'github'], plugin: ['code-review', 'ci'] },
-  git: { mcp: ['git', 'github'] },
-  test: { plugin: ['ci'] },
-  deploy: { mcp: ['release'], plugin: ['release'] },
-  monitor: { mcp: ['monitoring'] },
-  logs: { mcp: ['logs'] },
-  crm: { mcp: ['crm'], plugin: ['crm'] },
-  email: { mcp: ['email'], plugin: ['mail'] },
+const TASK_RESOURCE_ALIASES: Record<string, Partial<Record<GovernedResource, string[]>>> = {
+  code: { skill: ['bash', 'code', 'test'], mcp: ['git', 'github'], plugin: ['code-review', 'ci'] },
+  git: { skill: ['bash', 'git'], mcp: ['git', 'github'] },
+  test: { skill: ['bash', 'test'], plugin: ['ci'] },
+  deploy: { skill: ['bash', 'deploy'], mcp: ['release'], plugin: ['release'] },
+  monitor: { skill: ['monitor'], mcp: ['monitoring'] },
+  logs: { skill: ['logs'], mcp: ['logs'] },
+  crm: { skill: ['crm'], mcp: ['crm'], plugin: ['crm'] },
+  email: { skill: ['email', 'mail'], mcp: ['email'], plugin: ['mail'] },
 };
 
 export interface CapabilityPackage {
@@ -144,7 +144,7 @@ export function isTaskCapabilityAllowed(governance: CapabilityGovernance, capabi
   return governance.taskCapabilities.some((item) => item === '*' || item.toLowerCase() === normalized);
 }
 
-export function isTaskResourceAllowed(taskCapabilities: readonly string[], resource: Exclude<GovernedResource, 'skill'>, name: string): boolean {
+export function isTaskResourceAllowed(taskCapabilities: readonly string[], resource: GovernedResource, name: string): boolean {
   const normalizedName = name.trim().toLowerCase();
   if (!normalizedName) return false;
   return taskCapabilities.some((capability) => {

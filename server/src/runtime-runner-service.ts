@@ -243,8 +243,11 @@ export class RuntimeRunnerService {
           if (!billingAccess.allowed) throw new Error(billingAccess.reason ?? '当前账户不可用');
         }
         usageAgentId = session.agent_profile_id;
+        if (options.capabilities && options.capabilityScope !== undefined) {
+          throw new Error('显式能力清单不能与任务范围同时使用');
+        }
         const capabilities = options.capabilities ?? toPiCapabilityInjection(
-          options.capabilityScope?.length
+          options.capabilityScope !== undefined
             ? restrictCapabilityManifestForTask(
                 resolveCapabilitiesForWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid),
                 options.capabilityScope,

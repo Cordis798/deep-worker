@@ -121,6 +121,24 @@ describe('RuntimeRunnerService', () => {
     await service.close();
   });
 
+  it('拒绝同时提供显式能力清单和任务范围', async () => {
+    const runner = new FakePiRunner({ response: '不应执行' });
+    const service = new RuntimeRunnerService({ db, runner, retryBaseMs: 0 });
+    const result = await service.submit({
+      ownerUserId: 'u1',
+      workspaceJid: 'w1',
+      sessionId: 's1',
+      message: '冲突范围',
+      idempotencyKey: 'capability-scope-conflict',
+      capabilities: { hash: 'cap-hash', skills: [], mcpServers: [], plugins: [] },
+      capabilityScope: ['code'],
+    });
+    expect(result.turn.status).toBe('failed');
+    expect(result.turn.error).toContain('显式能力清单不能与任务范围同时使用');
+    expect(runner.calls).toHaveLength(0);
+    await service.close();
+  });
+
   it('收到取消信号时终止当前 Runner 且不触发重试', async () => {
     const calls: string[] = [];
     const runner: AgentRunner = {

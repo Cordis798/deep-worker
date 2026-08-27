@@ -49,7 +49,7 @@ describe('生效能力解析', () => {
 
   it('按路由任务能力裁剪运行时工具，避免注入整个工作区清单', () => {
     const manifest = resolveEffectiveCapabilities({
-      skills: [skill({ id: 'one', name: 'one', scope: 'user' })],
+      skills: [skill({ id: 'bash', name: 'bash', scope: 'system' }), skill({ id: 'sales', name: 'sales', scope: 'user' })],
       mcpServers: [
         { id: 'git', name: 'git', enabled: true, transport: 'http' },
         { id: 'release', name: 'release', enabled: true, transport: 'http' },
@@ -61,6 +61,7 @@ describe('生效能力解析', () => {
     });
     const scoped = restrictCapabilityManifestForTask(manifest, ['code']);
     expect(scoped.skills.selected).toHaveLength(1);
+    expect(scoped.skills.selected[0].name).toBe('bash');
     expect(scoped.mcp.selected.map((item) => item.name)).toEqual(['git']);
     expect(scoped.plugins.selected.map((item) => item.name)).toEqual(['ci']);
     expect(scoped.hash).not.toBe(manifest.hash);
