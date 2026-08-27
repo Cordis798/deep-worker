@@ -46,6 +46,7 @@ export interface RuntimeRunnerMessageInput {
   timeoutMs?: number;
   capabilities?: AgentRunRequest['capabilities'];
   capabilityScope?: readonly string[];
+  toolPolicy?: 'read' | 'write';
   signal?: AbortSignal;
 }
 
@@ -101,7 +102,7 @@ function shouldRetryRunnerError(message: string): boolean {
   ].some((marker) => message.includes(marker));
 }
 
-function toPiCapabilityInjection(manifest: CapabilityManifest): AgentRunRequest['capabilities'] {
+function toPiCapabilityInjection(manifest: CapabilityManifest, toolPolicy?: 'read' | 'write'): AgentRunRequest['capabilities'] {
   return {
     hash: manifest.hash,
     skills: manifest.skills.selected.map((skill) => ({
@@ -110,7 +111,7 @@ function toPiCapabilityInjection(manifest: CapabilityManifest): AgentRunRequest[
       path: skill.path,
       contentHash: skill.contentHash,
     })),
-    mcpServers: manifest.mcp.selected,
+    mcpServers: manifest.mcp.selected.map((server) => ({ ...server, ...(toolPolicy ? { toolPolicy } : {}) })),
     plugins: manifest.plugins.selected,
   };
 }
@@ -174,6 +175,7 @@ export class RuntimeRunnerService {
         timeoutMs: input.timeoutMs,
         capabilities: input.capabilities,
         capabilityScope: input.capabilityScope,
+        toolPolicy: input.toolPolicy,
         signal: input.signal,
       }),
     );
@@ -198,7 +200,7 @@ export class RuntimeRunnerService {
 
   private async processTurn(
     turnId: string,
-    options: { systemPrompt?: string; outputContract?: string; timeoutMs?: number; capabilities?: AgentRunRequest['capabilities']; capabilityScope?: readonly string[]; signal?: AbortSignal },
+    options: { systemPrompt?: string; outputContract?: string; timeoutMs?: number; capabilities?: AgentRunRequest['capabilities']; capabilityScope?: readonly string[]; toolPolicy?: 'read' | 'write'; signal?: AbortSignal },
   ): Promise<RuntimeRunnerResult> {
     const first = getRunnerTurnById(this.db, turnId);
     if (!first) throw new Error('Runner turn not found');
@@ -246,14 +248,20 @@ export class RuntimeRunnerService {
         if (options.capabilities && options.capabilityScope !== undefined) {
           throw new Error('显式能力清单不能与任务范围同时使用');
         }
-        const capabilities = options.capabilities ?? toPiCapabilityInjection(
-          options.capabilityScope !== undefined
-            ? restrictCapabilityManifestForTask(
-                resolveCapabilitiesForWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid),
-                options.capabilityScope,
-              )
-            : resolveCapabilitiesForWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid),
-        );
+        const capabilities = options.capabilities
+          ? {
+              ...options.capabilities,
+              ...(options.toolPolicy ? { mcpServers: options.capabilities.mcpServers.map((server) => ({ ...server, toolPolicy: options.toolPolicy })) } : {}),
+            }
+          : toPiCapabilityInjection(
+              options.capabilityScope !== undefined
+                ? restrictCapabilityManifestForTask(
+                    resolveCapabilitiesForWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid),
+                    options.capabilityScope,
+                  )
+                : resolveCapabilitiesForWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid),
+              options.toolPolicy,
+            );
         selectedProviderPool = this.getProviderPool(principalUserId);
         const selectedProvider = selectedProviderPool?.selectProvider(inbox.sessionId);
         selectedProviderId = selectedProvider?.id;

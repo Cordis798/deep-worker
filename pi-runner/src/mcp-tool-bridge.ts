@@ -12,6 +12,7 @@ interface McpTool {
   name: string;
   description?: string;
   inputSchema?: unknown;
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
 }
 
 interface McpTransport {
@@ -99,6 +100,12 @@ class JsonRpcMcpClient {
         name: item.name,
         ...(typeof item.description === 'string' ? { description: item.description } : {}),
         ...(item.inputSchema !== undefined ? { inputSchema: item.inputSchema } : {}),
+        ...(item.annotations && typeof item.annotations === 'object' && !Array.isArray(item.annotations)
+          ? { annotations: {
+              ...('readOnlyHint' in item.annotations && typeof item.annotations.readOnlyHint === 'boolean' ? { readOnlyHint: item.annotations.readOnlyHint } : {}),
+              ...('destructiveHint' in item.annotations && typeof item.annotations.destructiveHint === 'boolean' ? { destructiveHint: item.annotations.destructiveHint } : {}),
+            } }
+          : {}),
       };
     });
   }
@@ -360,7 +367,9 @@ export async function createMcpToolBridge(servers: readonly PiMcpServer[]): Prom
       const client = new JsonRpcMcpClient(createTransport(server));
       await client.connect();
       clients.push({ client, server });
-      for (const tool of await client.listTools()) {
+      const tools = await client.listTools();
+      for (const tool of tools) {
+        if (server.toolPolicy === 'read' && (tool.annotations?.readOnlyHint !== true || tool.annotations.destructiveHint === true)) continue;
         const baseName = `mcp_${safeToolName(server.name)}_${safeToolName(tool.name)}`;
         let name = baseName;
         if (usedNames.has(name)) name = `${baseName}_${crypto.createHash('sha256').update(`${server.id}:${tool.name}`).digest('hex').slice(0, 8)}`;

@@ -77,4 +77,25 @@ describe('Pi MCP 工具桥接', () => {
     expect(observedSignal?.aborted).toBe(true);
     await bridge!.close();
   });
+
+  it('只读工具策略拒绝未声明只读或破坏性 MCP 工具', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { method?: string };
+      if (body.method === 'initialize') return { ok: true, json: async () => ({ result: {} }) };
+      if (body.method === 'tools/list') {
+        return {
+          ok: true,
+          json: async () => ({ result: { tools: [
+            { name: 'lookup', annotations: { readOnlyHint: true, destructiveHint: false } },
+            { name: 'delete_record', annotations: { readOnlyHint: false, destructiveHint: true } },
+            { name: 'unknown' },
+          ] } }),
+        };
+      }
+      return { ok: true, json: async () => ({ result: { content: [{ type: 'text', text: 'ok' }] } }) };
+    }));
+    const bridge = await createMcpToolBridge([{ id: 'mcp-read', name: 'data-api', transport: 'http', url: 'https://example.test', toolPolicy: 'read' }]);
+    expect(bridge?.tools.map((tool) => tool.name)).toEqual(['mcp_data_api_lookup']);
+    await bridge!.close();
+  });
 });

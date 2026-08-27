@@ -197,6 +197,7 @@ export class AgentRouterService {
           message: context ? `${task.spec.input}\n\n前置任务结果：\n${context}` : task.spec.input,
           idempotencyKey: `router:${plan.id}:${task.id}`,
           capabilityScope: task.spec.requiredCapabilities,
+          toolPolicy: task.spec.risk === 'read' ? 'read' : 'write',
           timeoutMs: ROUTER_TASK_TIMEOUT_MS,
           signal: taskAbortController.signal,
         });
@@ -308,6 +309,7 @@ export class AgentRouterService {
         message: task.spec.input,
         idempotencyKey: `router:${input.planId}:${task.id}`,
         capabilityScope: task.spec.requiredCapabilities,
+        toolPolicy: task.spec.risk === 'read' ? 'read' : 'write',
         timeoutMs: ROUTER_TASK_TIMEOUT_MS,
         signal: taskAbortController.signal,
       });
