@@ -97,6 +97,7 @@ export function buildContainerArgs(
   },
   options: Pick<ContainerRunnerOptions, 'image' | 'dockerCommand'> & {
     limits?: Partial<ContainerLimits>;
+    entrypoint?: readonly string[];
   } = {},
 ): { command: string; args: string[]; limits: ContainerLimits } {
   const limits = { ...DEFAULT_LIMITS, ...options.limits, ...request.limits };
@@ -148,6 +149,7 @@ export function buildContainerArgs(
   }
   args.push(
     options.image ?? process.env.DEEP_WORKER_CONTAINER_IMAGE ?? 'deep-worker-pi:latest',
+    ...(options.entrypoint ?? []),
   );
   return {
     command: options.dockerCommand ?? process.env.DEEP_WORKER_DOCKER_COMMAND ?? 'docker',

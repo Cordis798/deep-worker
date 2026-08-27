@@ -51,6 +51,31 @@ describe('容器运行器', () => {
     }
   });
 
+  it('允许镜像使用显式的中性 SDK Worker 入口', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-container-entrypoint-'));
+    const workspace = path.join(root, 'workspace');
+    const session = path.join(root, 'session');
+    fs.mkdirSync(workspace);
+    fs.mkdirSync(session);
+    try {
+      const result = buildContainerArgs(
+        { cwd: workspace, sessionDir: session },
+        {
+          image: 'test-image:latest',
+          dockerCommand: 'docker',
+          entrypoint: ['node', '/app/pi-runner/dist/pi-sdk-worker.js'],
+        },
+      );
+      expect(result.args.slice(-3)).toEqual([
+        'test-image:latest',
+        'node',
+        '/app/pi-runner/dist/pi-sdk-worker.js',
+      ]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('拒绝重复目标和危险容器路径', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dw-container-'));
     const workspace = path.join(root, 'workspace');
