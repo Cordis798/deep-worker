@@ -38,6 +38,7 @@ import {
 import {
   addWorkspaceMember,
   canWorkspaceAction,
+  getWorkspaceAccess,
   listWorkspaceMembers,
   listAccessibleWorkspaces,
   revokeWorkspaceMember,
@@ -82,6 +83,22 @@ export function createWorkspaceRoutes(db: Db) {
       : undefined;
     if (!row) return c.json({ error: 'Workspace not found' }, 404);
     return c.json({ workspace: toWorkspacePublic(row) });
+  });
+
+  app.get('/:jid/access', (c) => {
+    const access = getWorkspaceAccess(db, c.get('user')!.id, c.req.param('jid'));
+    if (!access) return c.json({ error: 'Workspace not found' }, 404);
+    return c.json({
+      actor_user_id: access.actorUserId,
+      workspace_owner_user_id: access.workspaceOwnerUserId,
+      role: access.role,
+      actions: {
+        view: canWorkspaceAction(db, access.actorUserId, access.workspaceJid, 'view'),
+        converse: canWorkspaceAction(db, access.actorUserId, access.workspaceJid, 'converse'),
+        manage: canWorkspaceAction(db, access.actorUserId, access.workspaceJid, 'manage'),
+        copy: canWorkspaceAction(db, access.actorUserId, access.workspaceJid, 'copy'),
+      },
+    });
   });
 
   app.get('/:jid/members', (c) => {

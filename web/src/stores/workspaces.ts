@@ -20,6 +20,13 @@ export interface RuntimeSession {
   status: 'active' | 'archived';
   created_at: string;
   updated_at: string;
+  context_status?: 'new' | 'restored' | 'reset_required';
+  source_session_id?: string | null;
+}
+
+export interface WorkspaceAccess {
+  role: 'workspace_admin' | 'member' | 'viewer';
+  actions: { view: boolean; converse: boolean; manage: boolean; copy: boolean };
 }
 
 export interface ChannelMount {
@@ -32,6 +39,7 @@ interface WorkspaceState {
   workspaces: Workspace[];
   sessions: Record<string, RuntimeSession[]>;
   mounts: Record<string, ChannelMount[]>;
+  access: Record<string, WorkspaceAccess>;
   currentWorkspaceId: string | null;
   currentSessionId: string | null;
   loading: boolean;
@@ -39,10 +47,12 @@ interface WorkspaceState {
   load: () => Promise<void>;
   loadSessions: (workspaceId: string) => Promise<void>;
   loadMounts: (workspaceId: string) => Promise<void>;
+  loadAccess: (workspaceId: string) => Promise<void>;
   selectWorkspace: (workspaceId: string) => Promise<void>;
   selectSession: (sessionId: string) => void;
   createWorkspace: (name: string, agentProfileId?: string | null) => Promise<Workspace>;
   createSession: (workspaceId: string, name: string, agentProfileId?: string | null) => Promise<RuntimeSession>;
+  copySession: (workspaceId: string, sessionId: string) => Promise<{ workspace_jid: string; session_id: string }>;
 }
 
 function saved(key: string) {
@@ -65,6 +75,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   workspaces: [],
   sessions: {},
   mounts: {},
+  access: {},
   currentWorkspaceId: saved('deep-worker.workspace') ,
   currentSessionId: saved('deep-worker.session'),
   loading: false,
@@ -83,7 +94,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         loading: false,
       });
       if (workspace) {
-        await Promise.all([get().loadSessions(workspace.jid), get().loadMounts(workspace.jid)]);
+        await Promise.all([get().loadSessions(workspace.jid), get().loadMounts(workspace.jid), get().loadAccess(workspace.jid)]);
       }
     } catch (error) {
       set({ loading: false, error: error instanceof Error ? error.message : '加载工作区失败' });
@@ -106,10 +117,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set((state) => ({ mounts: { ...state.mounts, [workspaceId]: data.channel_mounts } }));
   },
 
+  loadAccess: async (workspaceId) => {
+    const data = await api.get<WorkspaceAccess>(`/api/workspaces/${encodeURIComponent(workspaceId)}/access`);
+    set((state) => ({ access: { ...state.access, [workspaceId]: data } }));
+  },
+
   selectWorkspace: async (workspaceId) => {
     set({ currentWorkspaceId: workspaceId, currentSessionId: null });
     save('deep-worker.workspace', workspaceId);
-    await Promise.all([get().loadSessions(workspaceId), get().loadMounts(workspaceId)]);
+    await Promise.all([get().loadSessions(workspaceId), get().loadMounts(workspaceId), get().loadAccess(workspaceId)]);
   },
 
   selectSession: (sessionId) => {
@@ -136,5 +152,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     await get().loadSessions(workspaceId);
     get().selectSession(data.session.id);
     return data.session;
+  },
+
+  copySession: async (workspaceId, sessionId) => {
+    const data = await api.post<{ workspace_jid: string; session_id: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/runtime-sessions/${encodeURIComponent(sessionId)}/copy`);
+    await get().load();
+    await get().selectWorkspace(data.workspace_jid);
+    get().selectSession(data.session_id);
+    return data;
   },
 }));

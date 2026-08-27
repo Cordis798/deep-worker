@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { getOwnedChannelAccount } from './channel-accounts.js';
 import { getRuntimeSessionById, listRuntimeSessions } from './runtime-sessions.js';
 import { getOwnedWorkspace } from './workspaces.js';
+import { canWorkspaceAction } from './workspace-acl.js';
 
 export type Db = Database.Database;
 
@@ -33,7 +34,7 @@ export function listWorkspaceMounts(
   ownerUserId: string,
   workspaceJid: string,
 ): ChannelMountRow[] | undefined {
-  if (!getOwnedWorkspace(db, ownerUserId, workspaceJid)) return undefined;
+  if (!canWorkspaceAction(db, ownerUserId, workspaceJid, 'view')) return undefined;
   return db
     .prepare(
       'SELECT * FROM channel_mounts WHERE workspace_jid = ? ORDER BY created_at ASC',
@@ -47,8 +48,7 @@ export function listSessionMounts(
   workspaceJid: string,
   sessionId: string,
 ): AgentChannelMountRow[] | undefined {
-  const ws = getOwnedWorkspace(db, ownerUserId, workspaceJid);
-  if (!ws) return undefined;
+  if (!canWorkspaceAction(db, ownerUserId, workspaceJid, 'view')) return undefined;
   const session = getRuntimeSessionById(db, sessionId);
   if (!session || session.workspace_jid !== workspaceJid) return undefined;
   return db
