@@ -17,3 +17,4 @@ export * from './pi-sdk-session.js';
 export * from './pi-session-discovery.js';
 export * from './pi-sdk-provider.js';
 export * from './pi-sdk-runtime.js';
+export * from './runtime-session-manager.js';
