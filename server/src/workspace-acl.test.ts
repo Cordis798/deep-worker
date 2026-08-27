@@ -88,11 +88,20 @@ describe('workspace ACL', () => {
 
   it('lets only an administrator manage members and protects the last administrator', () => {
     const db = fixture();
-    expect(addWorkspaceMember(db, 'admin', 'ws-1', 'outsider', 'viewer')).toEqual({ ok: true });
+    expect(addWorkspaceMember(db, 'admin', 'ws-1', 'outsider', 'viewer', {
+      jobRole: 'operations',
+      capabilityPackage: 'operations',
+    })).toEqual({ ok: true });
     expect(listWorkspaceMembers(db, 'member', 'ws-1')).toBeUndefined();
     expect(listWorkspaceMembers(db, 'admin', 'ws-1')).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ user_id: 'outsider', role: 'viewer', status: 'active' }),
+        expect.objectContaining({
+          user_id: 'outsider',
+          role: 'viewer',
+          job_role: 'operations',
+          capability_package: 'operations',
+          status: 'active',
+        }),
       ]),
     );
     expect(revokeWorkspaceMember(db, 'admin', 'ws-1', 'admin')).toEqual({
