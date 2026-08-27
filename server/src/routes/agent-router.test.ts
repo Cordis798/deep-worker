@@ -36,6 +36,7 @@ describe('agent router routes', () => {
     const jid = workspace.workspace.jid;
     const binding = await app.request(`/api/workspaces/${jid}/agents`, jsonRequest(`/api/workspaces/${jid}/agents`, { agent_profile_id: profile.agent_profile.id, capabilities: ['code'], role_tags: ['engineering'], priority: 10 }, cookie));
     expect(binding.status).toBe(201);
+    const bindingBody = (await binding.json()) as { agent: { bindingId: string } };
     const operationsBinding = await app.request(`/api/workspaces/${jid}/agents`, jsonRequest(`/api/workspaces/${jid}/agents`, { agent_profile_id: operationsProfile.agent_profile.id, capabilities: ['deploy'], role_tags: ['operations'], priority: 10 }, cookie));
     expect(operationsBinding.status).toBe(201);
 
@@ -67,11 +68,10 @@ describe('agent router routes', () => {
     expect(result.result.tasks).toHaveLength(2);
     expect(result.result.tasks.every((task) => task.status === 'completed')).toBe(true);
 
-    const parallelPlanResponse = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '请同时分析代码问题和发布监控' }, cookie));
+    const parallelPlanResponse = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '请同时分析代码问题和监控日志' }, cookie));
     expect(parallelPlanResponse.status).toBe(201);
     const parallelPlan = (await parallelPlanResponse.json()) as { plan: { id: string; route: { tasks: Array<{ dependsOn: number[] }> } } };
     expect(parallelPlan.plan.route.tasks.every((task) => task.dependsOn.length === 0)).toBe(true);
-    expect((await app.request(`/api/workspaces/${jid}/router/plans/${parallelPlan.plan.id}/approve`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } })).status).toBe(200);
     const parallelDispatch = await app.request(`/api/workspaces/${jid}/router/plans/${parallelPlan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
     expect(parallelDispatch.status).toBe(200);
     const parallelResult = (await parallelDispatch.json()) as { result: { status: string; tasks: Array<{ status: string }> } };
@@ -89,6 +89,13 @@ describe('agent router routes', () => {
     const cancelledBody = (await cancelledDispatch.json()) as { result: { status: string; tasks: Array<{ status: string }> } };
     expect(cancelledBody.result.status).toBe('cancelled');
     expect(cancelledBody.result.tasks.every((task) => task.status === 'skipped')).toBe(true);
+
+    const stalePlanResponse = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '请修复代码' }, cookie));
+    const stalePlan = (await stalePlanResponse.json()) as { plan: { id: string } };
+    expect((await app.request(`/api/workspaces/${jid}/router/plans/${stalePlan.plan.id}/approve`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } })).status).toBe(200);
+    expect((await app.request(`/api/workspaces/${jid}/agents/${bindingBody.agent.bindingId}`, { method: 'DELETE', headers: { cookie: `dw_session=${cookie}` } })).status).toBe(200);
+    const staleDispatch = await app.request(`/api/workspaces/${jid}/router/plans/${stalePlan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
+    expect(staleDispatch.status).toBe(409);
   });
 
   it('按成员岗位能力过滤 Router 候选并拒绝越界任务', async () => {
@@ -113,5 +120,10 @@ describe('agent router routes', () => {
     const body = (await planned.json()) as { plan: { route: { tasks: unknown[]; fallback: string } } };
     expect(body.plan.route.tasks).toHaveLength(0);
     expect(body.plan.route.fallback).toBe('reject');
+
+    const memberPlanResponse = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '写一份总结' }, member.cookie));
+    const memberPlan = (await memberPlanResponse.json()) as { plan: { id: string } };
+    const ownerDispatch = await app.request(`/api/workspaces/${jid}/router/plans/${memberPlan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${ownerCookie}` } });
+    expect(ownerDispatch.status).toBe(403);
   });
 });

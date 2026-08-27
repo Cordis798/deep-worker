@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth.js';
 import { canWorkspaceAction } from '../workspace-acl.js';
-import { AgentRouterService, RouterApprovalRequiredError, RouterDispatchBusyError } from '../agent-router/service.js';
+import { AgentRouterService, RouterApprovalRequiredError, RouterDispatchBusyError, RouterPlanActorMismatchError, RouterPlanStaleError } from '../agent-router/service.js';
 import {
   approveRouterPlan,
   createAgentBinding,
@@ -123,7 +123,7 @@ export function createAgentRouterRoutes(db: Database.Database, router: AgentRout
       const result = await router.dispatch({ actorUserId: user.id, workspaceJid: c.req.param('jid'), planId: c.req.param('planId') });
       return c.json({ result });
     } catch (error) {
-      const status = error instanceof RouterDispatchBusyError || error instanceof RouterApprovalRequiredError ? 409 : 404;
+      const status = error instanceof RouterPlanActorMismatchError ? 403 : error instanceof RouterDispatchBusyError || error instanceof RouterApprovalRequiredError || error instanceof RouterPlanStaleError ? 409 : 404;
       return c.json({ error: error instanceof Error ? error.message : String(error) }, status);
     }
   });

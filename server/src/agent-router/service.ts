@@ -45,7 +45,28 @@ export class RouterApprovalRequiredError extends Error {
   }
 }
 
+export class RouterPlanStaleError extends Error {
+  constructor(public readonly reason: 'capability_changed' | 'agent_binding_changed' | 'capability_unavailable') {
+    super(
+      reason === 'capability_changed'
+        ? 'Router plan capabilities changed; re-plan is required'
+        : reason === 'agent_binding_changed'
+          ? 'Router plan Agent binding changed; re-plan is required'
+          : 'Router plan capabilities are unavailable; re-plan is required',
+    );
+    this.name = 'RouterPlanStaleError';
+  }
+}
+
+export class RouterPlanActorMismatchError extends Error {
+  constructor() {
+    super('Router plan must be dispatched by its creator');
+    this.name = 'RouterPlanActorMismatchError';
+  }
+}
+
 const MAX_PARALLEL_ROUTER_TASKS = 3;
+const ROUTER_TASK_TIMEOUT_MS = 10 * 60 * 1000;
 
 export class AgentRouterService {
   private readonly activeDispatches = new Map<string, AbortController>();
@@ -88,6 +109,9 @@ export class AgentRouterService {
     const plan = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, input.planId);
     const tasks = listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, input.planId);
     if (!plan || !tasks) throw new Error('Router plan not found');
+    if (plan.actorUserId !== input.actorUserId) {
+      throw new RouterPlanActorMismatchError();
+    }
     if (plan.status === 'cancelled') return plan.result ?? this.resultFromTasks(input, plan, tasks.map((task) => ({
       taskId: task.id,
       ordinal: task.spec.ordinal,
@@ -100,11 +124,10 @@ export class AgentRouterService {
       throw new RouterApprovalRequiredError(plan.approvalStatus === 'pending' ? 'pending' : plan.approvalStatus === 'expired' ? 'expired' : 'rejected');
     }
     if (plan.status === 'completed') return plan.result ?? this.resultFromTasks(input, plan, []);
+    this.assertPlanFresh(input, plan, tasks);
     const workerId = `router-worker:${crypto.randomUUID()}`;
     const abortController = new AbortController();
-    this.activeDispatches.set(plan.id, abortController);
     if (!claimRouterPlan(this.db, plan.id, workerId)) {
-      this.activeDispatches.delete(plan.id);
       const current = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, input.planId);
       if (current?.status === 'completed') return current.result ?? this.resultFromTasks(input, current, []);
       if (current?.status === 'cancelled') return current.result ?? this.resultFromTasks(input, current, []);
@@ -114,8 +137,11 @@ export class AgentRouterService {
     if (tasks.length > 1 && tasks.every((task) => task.spec.dependsOn.length === 0)) {
       try {
         return await this.dispatchIndependentTasks(input, plan, tasks, workerId, abortController);
+      } catch (error) {
+        this.failDispatchAfterError(input, plan, workerId, error);
+        throw error;
       } finally {
-        this.activeDispatches.delete(plan.id);
+        this.clearActiveDispatch(plan.id, abortController);
       }
     }
     const results: AgentRouterTaskResult[] = [];
@@ -162,6 +188,7 @@ export class AgentRouterService {
           sessionId: session.id,
           message: context ? `${task.spec.input}\n\n前置任务结果：\n${context}` : task.spec.input,
           idempotencyKey: `router:${plan.id}:${task.id}`,
+          timeoutMs: ROUTER_TASK_TIMEOUT_MS,
           signal: abortController.signal,
         });
           if (abortController.signal.aborted || leaseLost) {
@@ -191,7 +218,7 @@ export class AgentRouterService {
       appendRouterEvent(this.db, plan.id, null, { type: failed ? 'plan_failed' : 'plan_completed', planId: plan.id });
       return result;
     } finally {
-      this.activeDispatches.delete(plan.id);
+      this.clearActiveDispatch(plan.id, abortController);
     }
   }
 
@@ -209,7 +236,15 @@ export class AgentRouterService {
         return this.resultFromTasks(input, current, results);
       }
       const batch = tasks.slice(index, index + MAX_PARALLEL_ROUTER_TASKS);
-      const batchResults = await Promise.all(batch.map((task) => this.executeIndependentTask(input, task, workerId, abortController)));
+      let firstError: unknown;
+      const batchPromises = batch.map((task) => this.executeIndependentTask(input, task, workerId, abortController).catch((error) => {
+        firstError ??= error;
+        abortController.abort();
+        throw error;
+      }));
+      const settled = await Promise.allSettled(batchPromises);
+      if (firstError !== undefined) throw firstError;
+      const batchResults = settled.map((item) => item.status === 'fulfilled' ? item.value : (() => { throw item.reason; })());
       results.push(...batchResults);
       if (batchResults.some((result) => result.status === 'failed')) {
         // Independent tasks do not block each other; continue the remaining batch.
@@ -255,6 +290,7 @@ export class AgentRouterService {
         sessionId: session.id,
         message: task.spec.input,
         idempotencyKey: `router:${input.planId}:${task.id}`,
+        timeoutMs: ROUTER_TASK_TIMEOUT_MS,
         signal: abortController.signal,
       });
       if (abortController.signal.aborted || leaseLost) {
@@ -322,6 +358,57 @@ export class AgentRouterService {
         ? ['*']
         : candidate.capabilities.filter((capability) => isTaskCapabilityAllowed(governance, capability)),
     }));
+  }
+
+  private assertPlanFresh(
+    input: { actorUserId: string; workspaceJid: string },
+    plan: AgentRouterPlanRow,
+    tasks: AgentRouterTaskRow[],
+  ): void {
+    let manifest;
+    try {
+      manifest = resolveCapabilitiesForWorkspace(this.db, input.actorUserId, input.workspaceJid);
+    } catch {
+      throw new RouterPlanStaleError('capability_unavailable');
+    }
+    if (plan.capabilityHash !== manifest.hash) {
+      throw new RouterPlanStaleError('capability_changed');
+    }
+    const candidates = this.applyTaskGovernance(this.candidates(input.actorUserId, input.workspaceJid), manifest.governance);
+    for (const task of tasks) {
+      const candidate = candidates.find(
+        (item) => item.bindingId === task.spec.bindingId && item.agentProfileId === task.spec.agentProfileId,
+      );
+      if (!candidate || !task.spec.requiredCapabilities.every((required) =>
+        candidate.capabilities.includes('*') || candidate.capabilities.some((capability) => capability.toLowerCase() === required.toLowerCase()),
+      )) {
+        throw new RouterPlanStaleError('agent_binding_changed');
+      }
+    }
+  }
+
+  private clearActiveDispatch(planId: string, controller: AbortController): void {
+    if (this.activeDispatches.get(planId) === controller) this.activeDispatches.delete(planId);
+  }
+
+  private failDispatchAfterError(
+    input: { actorUserId: string; workspaceJid: string; planId: string },
+    plan: AgentRouterPlanRow,
+    workerId: string,
+    error: unknown,
+  ): void {
+    const current = getRouterPlan(this.db, input.actorUserId, input.workspaceJid, plan.id);
+    if (!current || current.status !== 'running') return;
+    const rows = listRouterTaskRows(this.db, input.actorUserId, input.workspaceJid, plan.id) ?? [];
+    const message = error instanceof Error ? error.message : String(error);
+    const result: AgentRouterResult = {
+      ...this.resultFromTasks(input, current, rows.map((task) => this.taskResult(task))),
+      status: 'failed',
+      text: message,
+    };
+    if (setRouterPlanStatus(this.db, plan.id, 'failed', result, workerId)) {
+      appendRouterEvent(this.db, plan.id, null, { type: 'plan_failed', planId: plan.id, error: message });
+    }
   }
 
   private resultFromTasks(input: { planId: string }, plan: AgentRouterPlanRow, tasks: AgentRouterTaskResult[]): AgentRouterResult {
