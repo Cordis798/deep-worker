@@ -2,10 +2,22 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+export interface PiMcpServer {
+  id: string;
+  name: string;
+  transport: 'stdio' | 'http';
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  credentials?: Record<string, unknown>;
+}
+
 export interface PiCapabilityInjection {
   hash: string;
   skills: Array<{ id: string; name: string; path: string; contentHash: string }>;
-  mcpServers: Array<{ id: string; name: string; transport: 'stdio' | 'http'; command?: string; args?: string[]; cwd?: string; url?: string; credentials?: Record<string, unknown> }>;
+  mcpServers: PiMcpServer[];
   plugins: Array<{ id: string; name: string; version: string; enabled: boolean }>;
 }
 

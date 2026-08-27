@@ -26,6 +26,8 @@ export interface McpServerRow {
   updated_at: string;
 }
 
+export interface McpRuntimeServerRow extends McpServerRow, McpServerConfig {}
+
 function toRow(row: Record<string, unknown>): McpServerRow {
   return { ...row, enabled: row.enabled === 1 } as McpServerRow;
 }
@@ -53,6 +55,17 @@ function getEncryptedConfig(db: Database.Database, ownerUserId: string, id: stri
 export function listMcpServers(db: Database.Database, ownerUserId: string): McpServerRow[] {
   const rows = db.prepare('SELECT id, owner_user_id, name, transport, enabled, status, last_error, created_at, updated_at FROM mcp_servers WHERE owner_user_id = ? ORDER BY name').all(ownerUserId) as Array<Record<string, unknown>>;
   return rows.map(toRow);
+}
+
+/** 返回运行时建立 MCP 连接所需的配置；仅供服务端执行链路使用，不用于公开 API。 */
+export function listMcpServersForRuntime(db: Database.Database, ownerUserId: string): McpRuntimeServerRow[] {
+  const rows = db
+    .prepare('SELECT *, config_encrypted FROM mcp_servers WHERE owner_user_id = ? ORDER BY name')
+    .all(ownerUserId) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({
+    ...toRow(row),
+    ...(decryptChannelCredentials(String(row.config_encrypted)) as McpServerConfig),
+  }));
 }
 
 export function setMcpEnabled(db: Database.Database, ownerUserId: string, id: string, enabled: boolean): boolean {

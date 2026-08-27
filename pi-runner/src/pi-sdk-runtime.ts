@@ -8,6 +8,7 @@ import {
   SettingsManager,
 } from '@earendil-works/pi-coding-agent';
 import { materializePiCapabilities } from './capability-injection.js';
+import { createMcpToolBridge } from './mcp-tool-bridge.js';
 import { resolvePiSdkModel, type PiModelRuntimeLike } from './pi-sdk-provider.js';
 import { PiSdkRuntimeSession, type PiAgentSessionLike } from './pi-sdk-session.js';
 import { discoverPiSessionFile } from './pi-session-discovery.js';
@@ -31,6 +32,7 @@ interface CreateSdkSessionOptions {
   modelRuntime: unknown;
   model?: unknown;
   tools: string[];
+  customTools?: unknown[];
   resourceLoader: unknown;
   sessionManager: unknown;
   settingsManager: unknown;
@@ -160,19 +162,29 @@ export class PiSdkRuntimeAdapter implements AgentRuntime {
       { id: options.sessionId },
     );
 
-    const created = await this.dependencies.createAgentSession({
-      cwd: options.cwd,
-      agentDir,
-      modelRuntime,
-      ...(model ? { model } : {}),
-      tools: options.allowedTools ?? ['bash'],
-      resourceLoader,
-      sessionManager,
-      settingsManager,
-    });
-    const runtimeSession = new PiSdkRuntimeSession(created.session);
-    this.sessions.add(runtimeSession);
-    return runtimeSession;
+    const mcpBridge = await createMcpToolBridge(options.capabilities?.mcpServers ?? []);
+    try {
+      const created = await this.dependencies.createAgentSession({
+        cwd: options.cwd,
+        agentDir,
+        modelRuntime,
+        ...(model ? { model } : {}),
+        tools: [
+          ...(options.allowedTools ?? ['bash']),
+          ...(mcpBridge?.tools.map((tool) => tool.name) ?? []),
+        ],
+        ...(mcpBridge ? { customTools: mcpBridge.tools } : {}),
+        resourceLoader,
+        sessionManager,
+        settingsManager,
+      });
+      const runtimeSession = new PiSdkRuntimeSession(created.session, () => mcpBridge?.close());
+      this.sessions.add(runtimeSession);
+      return runtimeSession;
+    } catch (error) {
+      await mcpBridge?.close();
+      throw error;
+    }
   }
 
   async close(): Promise<void> {

@@ -37,7 +37,10 @@ export class PiSdkRuntimeSession implements RuntimeSession {
   private settledVersion = 0;
   private disposed = false;
 
-  constructor(private readonly session: PiAgentSessionLike) {
+  constructor(
+    private readonly session: PiAgentSessionLike,
+    private readonly disposeHook?: () => Promise<void> | void,
+  ) {
     this.unsubscribe = session.subscribe((event) => this.onSdkEvent(event));
   }
 
@@ -74,11 +77,12 @@ export class PiSdkRuntimeSession implements RuntimeSession {
     return this.session.compact(instructions);
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
     this.unsubscribe();
     this.session.dispose();
+    await this.disposeHook?.();
     this.listeners.clear();
     for (const resolve of this.settledWaiters) resolve();
     this.settledWaiters.clear();

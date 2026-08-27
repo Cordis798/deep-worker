@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { applyCapabilityGovernance, resolveCapabilitiesForWorkspace, resolveEffectiveCapabilities, trimCapabilityManifest, type SkillCandidate } from './capability-resolver.js';
+import { applyCapabilityGovernance, resolveCapabilitiesForWorkspace, resolveCapabilitiesFromDatabase, resolveEffectiveCapabilities, trimCapabilityManifest, type SkillCandidate } from './capability-resolver.js';
 import { resolveCapabilityGovernance } from './capability-governance.js';
 import { initDatabase } from '../db/migration.js';
 import { createWorkspace } from '../workspaces.js';
+import { createMcpServer } from './mcp-store.js';
 
 const skill = (candidate: Partial<SkillCandidate> & Pick<SkillCandidate, 'id' | 'name' | 'scope'>): SkillCandidate => ({
   enabled: true,
@@ -80,6 +81,22 @@ describe('生效能力解析', () => {
     const manifest = resolveCapabilitiesForWorkspace(db, 'owner', workspace.jid);
     expect(manifest.governance).toMatchObject({ jobRole: 'engineering', packageId: 'engineering' });
     expect(db.prepare('SELECT decision FROM capability_resolution_audit WHERE workspace_jid = ?').get(workspace.jid)).toEqual({ decision: 'allowed' });
+    db.close();
+  });
+
+  it('公开解析不携带 MCP 密文，运行时解析才恢复连接配置', () => {
+    const db = initDatabase(':memory:');
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO users (id, username, password_hash, role, status, permissions, created_at, updated_at)
+       VALUES ('owner', 'owner', 'x', 'admin', 'active', '[]', ?, ?)`,
+    ).run(now, now);
+    createMcpServer(db, 'owner', { name: 'data-api', transport: 'http', url: 'https://example.test', credentials: { token: 'secret' } });
+    const publicManifest = resolveCapabilitiesFromDatabase(db, 'owner');
+    expect(publicManifest.mcp.selected[0]).not.toHaveProperty('credentials');
+    expect(publicManifest.mcp.selected[0]).not.toHaveProperty('url');
+    const runtimeManifest = resolveCapabilitiesFromDatabase(db, 'owner', { includeRuntimeConfig: true });
+    expect(runtimeManifest.mcp.selected[0]).toMatchObject({ url: 'https://example.test', credentials: { token: 'secret' } });
     db.close();
   });
 });

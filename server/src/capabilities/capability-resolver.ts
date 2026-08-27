@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { buildBuiltinManifest, listSkills, type SkillRow } from './skill-store.js';
-import { listMcpServers, type McpServerRow } from './mcp-store.js';
+import { listMcpServers, listMcpServersForRuntime, type McpRuntimeServerRow, type McpServerRow } from './mcp-store.js';
 import { listPlugins, type PluginRow } from './plugin-catalog.js';
 import {
   isCapabilityAllowed,
@@ -31,6 +31,8 @@ export interface McpCandidate {
   args?: string[];
   cwd?: string;
   url?: string;
+  headers?: Record<string, string>;
+  credentials?: Record<string, unknown>;
 }
 
 export interface PluginCandidate {
@@ -161,17 +163,30 @@ function toSkillCandidate(row: SkillRow): SkillCandidate {
   return { id: row.id, name: row.name, scope: row.scope, path: row.install_path, contentHash: row.content_hash, dependencies: JSON.parse(row.dependencies_json) as string[], enabled: row.enabled };
 }
 
-function toMcpCandidate(row: McpServerRow): McpCandidate {
-  return { id: row.id, name: row.name, transport: row.transport, enabled: row.enabled };
+function toMcpCandidate(row: McpServerRow | McpRuntimeServerRow): McpCandidate {
+  const runtime = row as McpRuntimeServerRow;
+  return {
+    id: row.id,
+    name: row.name,
+    transport: row.transport,
+    enabled: row.enabled,
+    ...(runtime.command ? { command: runtime.command } : {}),
+    ...(runtime.args ? { args: runtime.args } : {}),
+    ...(runtime.cwd ? { cwd: runtime.cwd } : {}),
+    ...(runtime.url ? { url: runtime.url } : {}),
+    ...(runtime.headers ? { headers: runtime.headers } : {}),
+    ...(runtime.credentials ? { credentials: runtime.credentials } : {}),
+  };
 }
 
 function toPluginCandidate(row: PluginRow): PluginCandidate {
   return { id: row.id, name: row.name, version: row.version, enabled: row.enabled };
 }
 
-export function resolveCapabilitiesFromDatabase(db: Database.Database, ownerUserId: string, options: { projectKey?: string; builtinRoot?: string; selectedSkillIds?: string[]; selectedMcpIds?: string[]; selectedPluginIds?: string[]; governance?: CapabilityGovernance } = {}): CapabilityManifest {
+export function resolveCapabilitiesFromDatabase(db: Database.Database, ownerUserId: string, options: { projectKey?: string; builtinRoot?: string; selectedSkillIds?: string[]; selectedMcpIds?: string[]; selectedPluginIds?: string[]; governance?: CapabilityGovernance; includeRuntimeConfig?: boolean } = {}): CapabilityManifest {
   const builtin = buildBuiltinManifest(options.builtinRoot).map((item) => ({ id: `builtin:${item.name}`, name: item.name, scope: 'system' as const, path: item.path, contentHash: item.contentHash, dependencies: [], enabled: true }));
-  const manifest = resolveEffectiveCapabilities({ skills: [...builtin, ...listSkills(db, { ownerUserId, projectKey: options.projectKey }).map(toSkillCandidate)], mcpServers: listMcpServers(db, ownerUserId).map(toMcpCandidate), plugins: listPlugins(db, ownerUserId).map(toPluginCandidate), selectedSkillIds: options.selectedSkillIds, selectedMcpIds: options.selectedMcpIds, selectedPluginIds: options.selectedPluginIds });
+  const mcpServers = options.includeRuntimeConfig ? listMcpServersForRuntime(db, ownerUserId) : listMcpServers(db, ownerUserId);
+  const manifest = resolveEffectiveCapabilities({ skills: [...builtin, ...listSkills(db, { ownerUserId, projectKey: options.projectKey }).map(toSkillCandidate)], mcpServers: mcpServers.map(toMcpCandidate), plugins: listPlugins(db, ownerUserId).map(toPluginCandidate), selectedSkillIds: options.selectedSkillIds, selectedMcpIds: options.selectedMcpIds, selectedPluginIds: options.selectedPluginIds });
   return options.governance ? applyCapabilityGovernance(manifest, options.governance) : manifest;
 }
 
@@ -197,6 +212,7 @@ export function resolveCapabilitiesForWorkspace(
     const manifest = resolveCapabilitiesFromDatabase(db, access.credentialPrincipalId, {
       ...options,
       governance,
+      includeRuntimeConfig: true,
     });
     db.prepare(
       `INSERT INTO capability_resolution_audit (
