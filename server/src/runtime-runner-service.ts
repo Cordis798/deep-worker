@@ -47,6 +47,7 @@ export interface RuntimeRunnerMessageInput {
   capabilities?: AgentRunRequest['capabilities'];
   capabilityScope?: readonly string[];
   toolPolicy?: 'read' | 'write';
+  expectedAgentProfileHash?: string;
   signal?: AbortSignal;
 }
 
@@ -176,6 +177,7 @@ export class RuntimeRunnerService {
         capabilities: input.capabilities,
         capabilityScope: input.capabilityScope,
         toolPolicy: input.toolPolicy,
+        expectedAgentProfileHash: input.expectedAgentProfileHash,
         signal: input.signal,
       }),
     );
@@ -200,7 +202,7 @@ export class RuntimeRunnerService {
 
   private async processTurn(
     turnId: string,
-    options: { systemPrompt?: string; outputContract?: string; timeoutMs?: number; capabilities?: AgentRunRequest['capabilities']; capabilityScope?: readonly string[]; toolPolicy?: 'read' | 'write'; signal?: AbortSignal },
+    options: { systemPrompt?: string; outputContract?: string; timeoutMs?: number; capabilities?: AgentRunRequest['capabilities']; capabilityScope?: readonly string[]; toolPolicy?: 'read' | 'write'; expectedAgentProfileHash?: string; signal?: AbortSignal },
   ): Promise<RuntimeRunnerResult> {
     const first = getRunnerTurnById(this.db, turnId);
     if (!first) throw new Error('Runner turn not found');
@@ -269,6 +271,9 @@ export class RuntimeRunnerService {
         const profile = session.agent_profile_id
           ? getAgentProfileById(this.db, session.agent_profile_id)
           : undefined;
+        if (options.expectedAgentProfileHash && profile?.identity_hash !== options.expectedAgentProfileHash) {
+          throw new Error('AgentProfile 已变更，计划需要重新生成');
+        }
         const executionAbortController = new AbortController();
         const forwardAbort = () => executionAbortController.abort();
         if (options.signal?.aborted) executionAbortController.abort();

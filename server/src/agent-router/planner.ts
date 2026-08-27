@@ -81,11 +81,12 @@ export function buildAgentRouterPlan(
       input: message,
       dependsOn: parallel ? [] : ordinal === 0 ? [] : [ordinal - 1],
       risk: rule.risk,
+      ...(candidate.identityHash ? { agentProfileHash: candidate.identityHash } : {}),
     });
   }
   if (tasks.length === 0 && candidates.length > 0 && inferred.requiredCapabilities.length === 0) {
     const fallback = choose(candidates, [], 'general') ?? candidates[0];
-    tasks.push({ ordinal: 0, bindingId: fallback.bindingId, agentProfileId: fallback.agentProfileId, title: `${fallback.name}：通用处理`, requiredCapabilities: [], input: message, dependsOn: [], risk: 'read' });
+    tasks.push({ ordinal: 0, bindingId: fallback.bindingId, agentProfileId: fallback.agentProfileId, title: `${fallback.name}：通用处理`, requiredCapabilities: [], input: message, dependsOn: [], risk: 'read', ...(fallback.identityHash ? { agentProfileHash: fallback.identityHash } : {}) });
   }
   const risk = tasks.reduce<AgentRouterTaskRisk>(
     (current, task) => RISK_ORDER.indexOf(task.risk) > RISK_ORDER.indexOf(current) ? task.risk : current,

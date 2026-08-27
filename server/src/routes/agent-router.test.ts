@@ -93,6 +93,10 @@ describe('agent router routes', () => {
     const stalePlanResponse = await app.request(`/api/workspaces/${jid}/router/plans`, jsonRequest(`/api/workspaces/${jid}/router/plans`, { message: '请修复代码' }, cookie));
     const stalePlan = (await stalePlanResponse.json()) as { plan: { id: string } };
     expect((await app.request(`/api/workspaces/${jid}/router/plans/${stalePlan.plan.id}/approve`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } })).status).toBe(200);
+    const profileChanged = await app.request(`/api/agent-profiles/${profile.agent_profile.id}`, jsonRequest(`/api/agent-profiles/${profile.agent_profile.id}`, { identity_prompt: '负责新的研发任务边界' }, cookie, 'PATCH'));
+    expect(profileChanged.status).toBe(200);
+    const profileChangedDispatch = await app.request(`/api/workspaces/${jid}/router/plans/${stalePlan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
+    expect(profileChangedDispatch.status).toBe(409);
     expect((await app.request(`/api/workspaces/${jid}/agents/${bindingBody.agent.bindingId}`, { method: 'DELETE', headers: { cookie: `dw_session=${cookie}` } })).status).toBe(200);
     const staleDispatch = await app.request(`/api/workspaces/${jid}/router/plans/${stalePlan.plan.id}/dispatch`, { method: 'POST', headers: { cookie: `dw_session=${cookie}` } });
     expect(staleDispatch.status).toBe(409);

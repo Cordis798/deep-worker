@@ -198,6 +198,7 @@ export class AgentRouterService {
           idempotencyKey: `router:${plan.id}:${task.id}`,
           capabilityScope: task.spec.requiredCapabilities,
           toolPolicy: task.spec.risk === 'read' ? 'read' : 'write',
+          expectedAgentProfileHash: task.spec.agentProfileHash,
           timeoutMs: ROUTER_TASK_TIMEOUT_MS,
           signal: taskAbortController.signal,
         });
@@ -310,6 +311,7 @@ export class AgentRouterService {
         idempotencyKey: `router:${input.planId}:${task.id}`,
         capabilityScope: task.spec.requiredCapabilities,
         toolPolicy: task.spec.risk === 'read' ? 'read' : 'write',
+        expectedAgentProfileHash: task.spec.agentProfileHash,
         timeoutMs: ROUTER_TASK_TIMEOUT_MS,
         signal: taskAbortController.signal,
       });
@@ -368,6 +370,7 @@ export class AgentRouterService {
       createdBy: profile.owner_user_id,
       createdAt: profile.created_at,
       updatedAt: profile.updated_at,
+      identityHash: profile.identity_hash,
     }];
   }
 
@@ -402,7 +405,7 @@ export class AgentRouterService {
       );
       if (!candidate || !task.spec.requiredCapabilities.every((required) =>
         candidate.capabilities.includes('*') || candidate.capabilities.some((capability) => capability.toLowerCase() === required.toLowerCase()),
-      )) {
+      ) || !task.spec.agentProfileHash || candidate.identityHash !== task.spec.agentProfileHash) {
         throw new RouterPlanStaleError('agent_binding_changed');
       }
     }

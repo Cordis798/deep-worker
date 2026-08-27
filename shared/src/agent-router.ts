@@ -19,6 +19,7 @@ export interface AgentRouterCandidate {
   capabilities: string[];
   roleTags: string[];
   priority: number;
+  identityHash?: string;
 }
 
 export interface AgentRouterTaskSpec {
@@ -30,6 +31,8 @@ export interface AgentRouterTaskSpec {
   input: string;
   dependsOn: number[];
   risk: AgentRouterTaskRisk;
+  /** 计划创建时绑定的 AgentProfile 内容指纹。 */
+  agentProfileHash?: string;
 }
 
 export interface AgentRouterPlanSpec {

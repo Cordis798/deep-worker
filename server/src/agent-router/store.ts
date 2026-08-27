@@ -123,7 +123,7 @@ function routerPlanHash(input: { workspaceJid: string; actorUserId: string; mess
 export function listAgentBindings(db: Db, actorUserId: string, workspaceJid: string): AgentBindingRow[] | undefined {
   if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'view')) return undefined;
   const rows = db.prepare(
-    `SELECT b.*, p.name AS profile_name
+    `SELECT b.*, p.name AS profile_name, p.identity_hash AS profile_identity_hash
      FROM workspace_agent_bindings b JOIN agent_profiles p ON p.id = b.agent_profile_id
      WHERE b.workspace_jid = ? AND b.enabled = 1 AND p.status = 'active'
      ORDER BY b.priority DESC, b.display_name ASC`,
@@ -135,6 +135,7 @@ export function listAgentBindings(db: Db, actorUserId: string, workspaceJid: str
     capabilities: parse<string[]>(String(row.capability_json)) ?? [],
     roleTags: parse<string[]>(String(row.role_tags_json)) ?? [],
     priority: Number(row.priority) || 0,
+    ...(typeof row.profile_identity_hash === 'string' && row.profile_identity_hash ? { identityHash: row.profile_identity_hash } : {}),
     workspaceJid,
     enabled: row.enabled === 1,
     createdBy: String(row.created_by),
@@ -383,24 +384,28 @@ export function listRouterTaskRows(db: Db, actorUserId: string, workspaceJid: st
             input_json, status, attempt, result_json, error
      FROM agent_router_tasks WHERE plan_id = ? ORDER BY ordinal`,
   ).all(planId) as Array<Record<string, unknown>>;
-  return rows.map((row) => ({
-    id: String(row.id),
-    planId: String(row.plan_id),
-    spec: {
-      ordinal: Number(row.ordinal),
-      bindingId: row.agent_binding_id ? String(row.agent_binding_id) : null,
-      agentProfileId: String(row.agent_profile_id),
-      title: String(row.title),
-      requiredCapabilities: parse<{ requiredCapabilities?: string[] }>(String(row.input_json))?.requiredCapabilities ?? [],
-      input: parse<{ input?: string }>(String(row.input_json))?.input ?? '',
-      dependsOn: parse<{ dependsOn?: number[] }>(String(row.input_json))?.dependsOn ?? [],
-      risk: parse<{ risk?: AgentRouterTaskSpec['risk'] }>(String(row.input_json))?.risk ?? 'read',
-    },
-    status: String(row.status) as AgentRouterTaskStatus,
-    attempt: Number(row.attempt),
-    resultText: parse<{ text?: string }>(String(row.result_json))?.text ?? null,
-    error: row.error ? String(row.error) : null,
-  }));
+  return rows.map((row) => {
+    const input = parse<AgentRouterTaskSpec>(String(row.input_json));
+    return {
+      id: String(row.id),
+      planId: String(row.plan_id),
+      spec: {
+        ordinal: Number(row.ordinal),
+        bindingId: row.agent_binding_id ? String(row.agent_binding_id) : null,
+        agentProfileId: String(row.agent_profile_id),
+        title: String(row.title),
+        requiredCapabilities: input?.requiredCapabilities ?? [],
+        input: input?.input ?? '',
+        dependsOn: input?.dependsOn ?? [],
+        risk: input?.risk ?? 'read',
+        ...(input?.agentProfileHash ? { agentProfileHash: input.agentProfileHash } : {}),
+      },
+      status: String(row.status) as AgentRouterTaskStatus,
+      attempt: Number(row.attempt),
+      resultText: parse<{ text?: string }>(String(row.result_json))?.text ?? null,
+      error: row.error ? String(row.error) : null,
+    };
+  });
 }
 
 export function setRouterPlanStatus(db: Db, planId: string, status: AgentRouterPlanStatus, result?: AgentRouterResult, workerId?: string): boolean {
