@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
  * 导出当前版本，迁移测试可以据此确认旧数据库已经升级到最新版本，
  * 不必在测试中重复维护版本号。
  */
-export const CURRENT_SCHEMA_VERSION = 17;
+export const CURRENT_SCHEMA_VERSION = 18;
 
 export class MigrationError extends Error {}
 
@@ -973,6 +973,40 @@ function migrateAgentRouterLeases(db: Database.Database): void {
   `);
 }
 
+function migrateAgentRouterApprovals(db: Database.Database): void {
+  db.exec(`
+    ALTER TABLE agent_router_plans ADD COLUMN approval_required INTEGER NOT NULL DEFAULT 0
+      CHECK (approval_required IN (0, 1));
+    ALTER TABLE agent_router_plans ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'not_required'
+      CHECK (approval_status IN ('not_required', 'pending', 'approved', 'rejected', 'expired'));
+    ALTER TABLE agent_router_plans ADD COLUMN approval_expires_at TEXT;
+    ALTER TABLE agent_router_plans ADD COLUMN approval_hash TEXT;
+    ALTER TABLE agent_router_plans ADD COLUMN approved_by TEXT;
+    ALTER TABLE agent_router_plans ADD COLUMN approved_at TEXT;
+    CREATE TABLE IF NOT EXISTS agent_router_approvals (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL UNIQUE,
+      workspace_jid TEXT NOT NULL,
+      actor_user_id TEXT NOT NULL,
+      plan_hash TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+      expires_at TEXT NOT NULL,
+      decided_by TEXT,
+      decided_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (plan_id) REFERENCES agent_router_plans(id) ON DELETE CASCADE,
+      FOREIGN KEY (workspace_jid) REFERENCES workspaces(jid) ON DELETE CASCADE,
+      FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_router_approvals_expiry
+      ON agent_router_approvals(status, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_router_approvals_workspace
+      ON agent_router_approvals(workspace_jid, created_at DESC);
+  `);
+}
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: 'bootstrap_meta_tables', up: createBootstrap },
   { version: 2, name: 'runtime_flags', up: createRuntimeFlags },
@@ -991,6 +1025,7 @@ export const MIGRATIONS: Migration[] = [
   { version: 15, name: 'capability_governance', up: migrateCapabilityGovernance },
   { version: 16, name: 'agent_router', up: migrateAgentRouter },
   { version: 17, name: 'agent_router_leases', up: migrateAgentRouterLeases },
+  { version: 18, name: 'agent_router_approvals', up: migrateAgentRouterApprovals },
 ];
 
 function tableExists(db: Database.Database, name: string): boolean {

@@ -1,5 +1,16 @@
-export type AgentRouterPlanStatus = 'planned' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type AgentRouterPlanStatus =
+  | 'planned'
+  | 'awaiting_approval'
+  | 'running'
+  | 'completed'
+  | 'partial'
+  | 'failed'
+  | 'cancelled'
+  | 'uncertain'
+  | 'validation_failed';
 export type AgentRouterTaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'skipped';
+export type AgentRouterTaskRisk = 'read' | 'write' | 'external' | 'destructive';
+export type AgentRouterApprovalStatus = 'not_required' | 'pending' | 'approved' | 'rejected' | 'expired';
 
 export interface AgentRouterCandidate {
   bindingId: string | null;
@@ -18,6 +29,7 @@ export interface AgentRouterTaskSpec {
   requiredCapabilities: string[];
   input: string;
   dependsOn: number[];
+  risk: AgentRouterTaskRisk;
 }
 
 export interface AgentRouterPlanSpec {
@@ -26,6 +38,7 @@ export interface AgentRouterPlanSpec {
   tasks: AgentRouterTaskSpec[];
   fallback: 'single_agent' | 'reject';
   explanation: string;
+  risk: AgentRouterTaskRisk;
 }
 
 export interface AgentRouterTaskResult {

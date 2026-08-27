@@ -108,6 +108,7 @@ describe('sqlite migration framework', () => {
       'billing_audit_log', 'usage_events', 'usage_event_models', 'usage_daily_summary',
       'billing_quota_overrides',
       'workspace_members',
+      'agent_router_approvals',
     ]) {
       expect(
         db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),
@@ -124,6 +125,9 @@ describe('sqlite migration framework', () => {
     ).toBeTruthy();
     expect(
       db.prepare("SELECT 1 FROM pragma_table_info('agent_router_plans') WHERE name = 'dispatch_lease_expires_at'").get(),
+    ).toBeTruthy();
+    expect(
+      db.prepare("SELECT 1 FROM pragma_table_info('agent_router_plans') WHERE name = 'approval_status'").get(),
     ).toBeTruthy();
     db.close();
   });
