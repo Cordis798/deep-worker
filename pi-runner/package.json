@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "dependencies": {
-    "@deep-worker/shared": "0.1.0"
+    "@deep-worker/shared": "0.1.0",
+    "@earendil-works/pi-coding-agent": "0.84.2"
   },
   "scripts": {
     "build": "tsc",
