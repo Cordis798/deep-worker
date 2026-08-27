@@ -25,6 +25,7 @@ import {
   skipRouterTask,
   type AgentBindingRow,
   type AgentRouterPlanRow,
+  type AgentRouterTaskRow,
 } from './store.js';
 
 export type Db = Database.Database;
