@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { initDatabase } from './db/migration.js';
 import {
+  addWorkspaceMember,
   canWorkspaceAction,
   getWorkspaceAccess,
+  listWorkspaceMembers,
   listAccessibleWorkspaces,
+  revokeWorkspaceMember,
   type WorkspaceAction,
 } from './workspace-acl.js';
 import { createWorkspace } from './workspaces.js';
@@ -80,6 +83,26 @@ describe('workspace ACL', () => {
         .prepare('SELECT role, status FROM workspace_members WHERE workspace_jid = ? AND user_id = ?')
         .get(row!.jid, 'admin'),
     ).toEqual({ role: 'workspace_admin', status: 'active' });
+    db.close();
+  });
+
+  it('lets only an administrator manage members and protects the last administrator', () => {
+    const db = fixture();
+    expect(addWorkspaceMember(db, 'admin', 'ws-1', 'outsider', 'viewer')).toEqual({ ok: true });
+    expect(listWorkspaceMembers(db, 'member', 'ws-1')).toBeUndefined();
+    expect(listWorkspaceMembers(db, 'admin', 'ws-1')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ user_id: 'outsider', role: 'viewer', status: 'active' }),
+      ]),
+    );
+    expect(revokeWorkspaceMember(db, 'admin', 'ws-1', 'admin')).toEqual({
+      ok: false,
+      reason: 'last_admin',
+    });
+    expect(revokeWorkspaceMember(db, 'member', 'ws-1', 'outsider')).toEqual({
+      ok: false,
+      reason: 'forbidden',
+    });
     db.close();
   });
 });

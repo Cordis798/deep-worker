@@ -13,6 +13,19 @@ export interface WorkspaceAccessContext {
   role: WorkspaceRole;
 }
 
+export interface WorkspaceMemberRow {
+  workspace_jid: string;
+  user_id: string;
+  username: string;
+  display_name: string;
+  role: WorkspaceRole;
+  status: 'active' | 'revoked';
+  invited_by: string | null;
+  created_at: string;
+  updated_at: string;
+  revoked_at: string | null;
+}
+
 export function getWorkspaceAccess(
   db: Database.Database,
   actorUserId: string,
@@ -69,4 +82,70 @@ export function listAccessibleWorkspaces(
        ORDER BY w.is_home DESC, w.created_at ASC`,
     )
     .all(actorUserId) as WorkspaceRow[];
+}
+
+export function listWorkspaceMembers(
+  db: Database.Database,
+  actorUserId: string,
+  workspaceJid: string,
+): WorkspaceMemberRow[] | undefined {
+  if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'manage')) return undefined;
+  return db
+    .prepare(
+      `SELECT m.*, u.username, u.display_name
+       FROM workspace_members m JOIN users u ON u.id = m.user_id
+       WHERE m.workspace_jid = ? ORDER BY m.status ASC, m.role ASC, u.username ASC`,
+    )
+    .all(workspaceJid) as WorkspaceMemberRow[];
+}
+
+export function addWorkspaceMember(
+  db: Database.Database,
+  actorUserId: string,
+  workspaceJid: string,
+  userId: string,
+  role: Exclude<WorkspaceRole, 'workspace_admin'>,
+): { ok: boolean; reason?: 'forbidden' | 'workspace_not_found' | 'user_not_found' } {
+  if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'manage')) {
+    return { ok: false, reason: 'forbidden' };
+  }
+  const user = db.prepare("SELECT id FROM users WHERE id = ? AND status = 'active' AND deleted_at IS NULL").get(userId);
+  if (!user) return { ok: false, reason: 'user_not_found' };
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO workspace_members (
+      workspace_jid, user_id, role, status, invited_by, created_at, updated_at, revoked_at
+    ) VALUES (?, ?, ?, 'active', ?, ?, ?, NULL)
+    ON CONFLICT(workspace_jid, user_id) DO UPDATE SET
+      role = excluded.role, status = 'active', invited_by = excluded.invited_by,
+      updated_at = excluded.updated_at, revoked_at = NULL`,
+  ).run(workspaceJid, userId, role, actorUserId, now, now);
+  return { ok: true };
+}
+
+export function revokeWorkspaceMember(
+  db: Database.Database,
+  actorUserId: string,
+  workspaceJid: string,
+  userId: string,
+): { ok: boolean; reason?: 'forbidden' | 'not_found' | 'last_admin' } {
+  if (!canWorkspaceAction(db, actorUserId, workspaceJid, 'manage')) {
+    return { ok: false, reason: 'forbidden' };
+  }
+  const target = db
+    .prepare('SELECT role, status FROM workspace_members WHERE workspace_jid = ? AND user_id = ?')
+    .get(workspaceJid, userId) as { role: WorkspaceRole; status: string } | undefined;
+  if (!target || target.status !== 'active') return { ok: false, reason: 'not_found' };
+  if (target.role === 'workspace_admin') {
+    const count = db
+      .prepare("SELECT COUNT(*) AS count FROM workspace_members WHERE workspace_jid = ? AND role = 'workspace_admin' AND status = 'active'")
+      .get(workspaceJid) as { count: number };
+    if (count.count <= 1) return { ok: false, reason: 'last_admin' };
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE workspace_members SET status = 'revoked', revoked_at = ?, updated_at = ?
+     WHERE workspace_jid = ? AND user_id = ?`,
+  ).run(now, now, workspaceJid, userId);
+  return { ok: true };
 }
