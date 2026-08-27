@@ -54,4 +54,9 @@ describe('agent router planner', () => {
     expect(plan.tasks[0].dependsOn).toEqual([]);
     expect(plan.tasks[1].dependsOn).toEqual([0]);
   });
+
+  it('包含提交或删除动作的分析请求仍需保留变更风险', () => {
+    expect(buildAgentRouterPlan('分析代码并提交 git', candidates).risk).toBe('write');
+    expect(buildAgentRouterPlan('查看代码并删除文件', candidates).risk).toBe('write');
+  });
 });

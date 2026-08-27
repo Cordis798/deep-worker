@@ -18,10 +18,14 @@ function requestsParallelWork(text: string): boolean {
 }
 
 function effectiveRuleRisk(rule: (typeof INTENT_RULES)[number], message: string): AgentRouterTaskRisk {
-  if (rule.intent === 'engineering' && includesAny(message, ['分析', '审查', '查看', 'review']) && !includesAny(message, ['修复', '开发', '编写', '改动'])) {
+  const mutationTokens = [
+    '修复', '开发', '编写', '改动', '修改', '创建', '更新', '重构', '实现', '添加', '删除', '移除', '提交', '推送', '合并',
+    'commit', 'push', 'delete', 'remove', 'modify', 'create', 'update', 'refactor', 'write',
+  ];
+  if (rule.intent === 'engineering' && includesAny(message, ['分析', '审查', '查看', 'review']) && !includesAny(message, mutationTokens)) {
     return 'read';
   }
-  if (rule.intent === 'operations' && includesAny(message, ['监控', '日志', '告警']) && !includesAny(message, ['部署', '发布', '上线'])) {
+  if (rule.intent === 'operations' && includesAny(message, ['监控', '日志', '告警']) && !includesAny(message, ['部署', '发布', '上线', ...mutationTokens])) {
     return 'read';
   }
   return rule.risk;
