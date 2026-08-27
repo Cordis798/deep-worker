@@ -56,6 +56,11 @@ export const updateRuntimeSessionSchema = z
     message: '至少需要提供一个可修改字段',
   });
 
+export const workspaceMemberSchema = z.object({
+  user_id: nonEmptyString('用户 ID', 200),
+  role: z.enum(['member', 'viewer']),
+});
+
 export const createChannelAccountSchema = z.object({
   provider: z.enum(['feishu', 'telegram', 'qq', 'dingtalk', 'wechat', 'discord', 'whatsapp']),
   name: nonEmptyString('账号名', 80),

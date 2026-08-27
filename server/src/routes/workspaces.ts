@@ -10,11 +10,12 @@ import {
 } from '../channel-mounts.js';
 import { authMiddleware } from '../middleware/auth.js';
 import {
-  archiveRuntimeSession,
-  createRuntimeSession,
-  listRuntimeSessions,
+  archiveAccessibleRuntimeSession,
+  createAccessibleRuntimeSession,
+  getAccessibleRuntimeSession,
+  listAccessibleRuntimeSessions,
   toRuntimeSessionPublic,
-  updateRuntimeSession,
+  updateAccessibleRuntimeSession,
 } from '../runtime-sessions.js';
 import {
   bindChatSchema,
@@ -23,15 +24,23 @@ import {
   formatZodError,
   updateRuntimeSessionSchema,
   updateWorkspaceSchema,
+  workspaceMemberSchema,
 } from '../schemas.js';
 import {
   createWorkspace,
   deleteWorkspace,
+  getWorkspaceById,
   getOwnedWorkspace,
-  listOwnedWorkspaces,
   toWorkspacePublic,
   updateWorkspace,
 } from '../workspaces.js';
+import {
+  addWorkspaceMember,
+  canWorkspaceAction,
+  listWorkspaceMembers,
+  listAccessibleWorkspaces,
+  revokeWorkspaceMember,
+} from '../workspace-acl.js';
 import type { Db } from '../workspaces.js';
 import type { AppVariables } from '../types.js';
 import { resolveRequestedExecutionMode } from '../execution-policy.js';
@@ -43,7 +52,7 @@ export function createWorkspaceRoutes(db: Db) {
   app.get('/', (c) => {
     const user = c.get('user')!;
     return c.json({
-      workspaces: listOwnedWorkspaces(db, user.id).map(toWorkspacePublic),
+      workspaces: listAccessibleWorkspaces(db, user.id).map(toWorkspacePublic),
     });
   });
 
@@ -67,9 +76,50 @@ export function createWorkspaceRoutes(db: Db) {
 
   app.get('/:jid', (c) => {
     const user = c.get('user')!;
-    const row = getOwnedWorkspace(db, user.id, c.req.param('jid'));
+    const row = canWorkspaceAction(db, user.id, c.req.param('jid'), 'view')
+      ? getWorkspaceById(db, c.req.param('jid'))
+      : undefined;
     if (!row) return c.json({ error: 'Workspace not found' }, 404);
     return c.json({ workspace: toWorkspacePublic(row) });
+  });
+
+  app.get('/:jid/members', (c) => {
+    const members = listWorkspaceMembers(db, c.get('user')!.id, c.req.param('jid'));
+    if (!members) return c.json({ error: 'Workspace not found' }, 404);
+    return c.json({ members });
+  });
+
+  app.post('/:jid/members', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const parsed = workspaceMemberSchema.safeParse(body);
+    if (!parsed.success) return c.json({ error: formatZodError(parsed.error) }, 400);
+    const result = addWorkspaceMember(
+      db,
+      c.get('user')!.id,
+      c.req.param('jid'),
+      parsed.data.user_id,
+      parsed.data.role,
+    );
+    if (!result.ok) {
+      if (result.reason === 'forbidden') return c.json({ error: 'Workspace not found' }, 404);
+      if (result.reason === 'user_not_found') return c.json({ error: 'User not found' }, 404);
+      return c.json({ error: 'Workspace not found' }, 404);
+    }
+    return c.json({ success: true }, 201);
+  });
+
+  app.delete('/:jid/members/:userId', (c) => {
+    const result = revokeWorkspaceMember(
+      db,
+      c.get('user')!.id,
+      c.req.param('jid'),
+      c.req.param('userId'),
+    );
+    if (!result.ok) {
+      if (result.reason === 'last_admin') return c.json({ error: '不能移除最后一名工作区管理员' }, 409);
+      return c.json({ error: 'Workspace member not found' }, 404);
+    }
+    return c.json({ success: true });
   });
 
   app.patch('/:jid', async (c) => {
@@ -134,7 +184,7 @@ export function createWorkspaceRoutes(db: Db) {
 
   app.get('/:jid/runtime-sessions', (c) => {
     const user = c.get('user')!;
-    const sessions = listRuntimeSessions(db, user.id, c.req.param('jid'));
+    const sessions = listAccessibleRuntimeSessions(db, user.id, c.req.param('jid'));
     if (!sessions) return c.json({ error: 'Workspace not found' }, 404);
     return c.json({ sessions: sessions.map(toRuntimeSessionPublic) });
   });
@@ -146,15 +196,15 @@ export function createWorkspaceRoutes(db: Db) {
     if (!parsed.success) {
       return c.json({ error: formatZodError(parsed.error) }, 400);
     }
-    const result = createRuntimeSession(db, user.id, c.req.param('jid'), parsed.data);
+    const result = createAccessibleRuntimeSession(db, user.id, c.req.param('jid'), parsed.data);
     if (!result.ok) {
       if (result.reason === 'invalid_profile') {
         return c.json({ error: 'Agent profile not found' }, 404);
       }
       return c.json({ error: 'Workspace not found' }, 404);
     }
-    const sessions = listRuntimeSessions(db, user.id, c.req.param('jid'))!;
-    return c.json({ session: toRuntimeSessionPublic(sessions[0]) }, 201);
+    const session = getAccessibleRuntimeSession(db, user.id, c.req.param('jid'), result.id!);
+    return c.json({ session: toRuntimeSessionPublic(session!) }, 201);
   });
 
   app.patch('/:jid/runtime-sessions/:sessionId', async (c) => {
@@ -164,7 +214,7 @@ export function createWorkspaceRoutes(db: Db) {
     if (!parsed.success) {
       return c.json({ error: formatZodError(parsed.error) }, 400);
     }
-    const result = updateRuntimeSession(
+    const result = updateAccessibleRuntimeSession(
       db,
       user.id,
       c.req.param('jid'),
@@ -177,7 +227,7 @@ export function createWorkspaceRoutes(db: Db) {
 
   app.delete('/:jid/runtime-sessions/:sessionId', (c) => {
     const user = c.get('user')!;
-    const result = archiveRuntimeSession(
+    const result = archiveAccessibleRuntimeSession(
       db,
       user.id,
       c.req.param('jid'),

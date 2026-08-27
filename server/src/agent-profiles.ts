@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
+import { canWorkspaceAction } from './workspace-acl.js';
 
 export type Db = Database.Database;
 
@@ -196,6 +197,66 @@ export function listOwnedAgentProfiles(
     .all(ownerUserId) as AgentProfileRow[];
 }
 
+export function listAccessibleAgentProfiles(
+  db: Db,
+  actorUserId: string,
+): AgentProfileRow[] {
+  return db
+    .prepare(
+      `SELECT DISTINCT p.* FROM agent_profiles p
+       LEFT JOIN workspaces w ON w.agent_profile_id = p.id AND w.status = 'active'
+       LEFT JOIN workspace_members m ON m.workspace_jid = w.jid
+         AND m.user_id = ? AND m.status = 'active'
+       WHERE p.owner_user_id = ? OR m.user_id IS NOT NULL
+       ORDER BY p.updated_at DESC`,
+    )
+    .all(actorUserId, actorUserId) as AgentProfileRow[];
+}
+
+export function getAccessibleAgentProfile(
+  db: Db,
+  actorUserId: string,
+  id: string,
+): AgentProfileRow | undefined {
+  return db
+    .prepare(
+      `SELECT DISTINCT p.* FROM agent_profiles p
+       LEFT JOIN workspaces w ON w.agent_profile_id = p.id AND w.status = 'active'
+       LEFT JOIN workspace_members m ON m.workspace_jid = w.jid
+         AND m.user_id = ? AND m.status = 'active'
+       WHERE p.id = ? AND (p.owner_user_id = ? OR m.user_id IS NOT NULL)`,
+    )
+    .get(actorUserId, id, actorUserId) as AgentProfileRow | undefined;
+}
+
+export function canManageAgentProfile(db: Db, actorUserId: string, id: string): boolean {
+  const profile = getAgentProfileById(db, id);
+  if (!profile) return false;
+  if (profile.owner_user_id === actorUserId) return true;
+  const binding = db
+    .prepare(
+      `SELECT w.jid FROM workspaces w
+       JOIN workspace_members m ON m.workspace_jid = w.jid
+       WHERE w.agent_profile_id = ? AND w.status = 'active'
+         AND m.user_id = ? AND m.role = 'workspace_admin' AND m.status = 'active'
+       LIMIT 1`,
+    )
+    .get(id, actorUserId) as { jid?: string } | undefined;
+  return !!binding?.jid && canWorkspaceAction(db, actorUserId, binding.jid, 'manage');
+}
+
+export function updateAccessibleAgentProfile(
+  db: Db,
+  actorUserId: string,
+  id: string,
+  fields: Partial<AgentProfileFields>,
+): { ok: boolean; reason?: 'not_found' | 'archived' } {
+  if (!canManageAgentProfile(db, actorUserId, id)) return { ok: false, reason: 'not_found' };
+  const profile = getAgentProfileById(db, id);
+  if (!profile) return { ok: false, reason: 'not_found' };
+  return updateAgentProfile(db, profile.owner_user_id, id, fields);
+}
+
 function promptFieldsChanged(
   row: AgentProfileRow,
   merged: AgentProfileFields,
@@ -309,6 +370,19 @@ export function listPromptVersions(
     .all(agentProfileId) as PromptVersionRow[];
 }
 
+export function listAccessiblePromptVersions(
+  db: Db,
+  actorUserId: string,
+  agentProfileId: string,
+): PromptVersionRow[] | undefined {
+  if (!getAccessibleAgentProfile(db, actorUserId, agentProfileId)) return undefined;
+  return db
+    .prepare(
+      'SELECT * FROM agent_profile_prompt_versions WHERE agent_profile_id = ? ORDER BY version DESC',
+    )
+    .all(agentProfileId) as PromptVersionRow[];
+}
+
 export function restorePromptVersion(
   db: Db,
   ownerUserId: string,
@@ -367,6 +441,20 @@ export function restorePromptVersion(
     }
   })();
   return { ok: true };
+}
+
+export function restoreAccessiblePromptVersion(
+  db: Db,
+  actorUserId: string,
+  agentProfileId: string,
+  version: number,
+): { ok: boolean; reason?: 'profile_not_found' | 'archived' | 'version_not_found' } {
+  if (!canManageAgentProfile(db, actorUserId, agentProfileId)) {
+    return { ok: false, reason: 'profile_not_found' };
+  }
+  const profile = getAgentProfileById(db, agentProfileId);
+  if (!profile) return { ok: false, reason: 'profile_not_found' };
+  return restorePromptVersion(db, profile.owner_user_id, agentProfileId, version);
 }
 
 export function toAgentProfilePublic(row: AgentProfileRow) {

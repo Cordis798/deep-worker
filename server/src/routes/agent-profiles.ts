@@ -2,12 +2,12 @@ import { Hono } from 'hono';
 import {
   createAgentProfile,
   deleteAgentProfile,
-  getOwnedAgentProfile,
-  listOwnedAgentProfiles,
-  listPromptVersions,
-  restorePromptVersion,
+  getAccessibleAgentProfile,
+  listAccessibleAgentProfiles,
+  listAccessiblePromptVersions,
+  restoreAccessiblePromptVersion,
   toAgentProfilePublic,
-  updateAgentProfile,
+  updateAccessibleAgentProfile,
 } from '../agent-profiles.js';
 import { authMiddleware } from '../middleware/auth.js';
 import {
@@ -25,7 +25,7 @@ export function createAgentProfileRoutes(db: Db) {
   app.get('/', (c) => {
     const user = c.get('user')!;
     return c.json({
-      agent_profiles: listOwnedAgentProfiles(db, user.id).map(toAgentProfilePublic),
+      agent_profiles: listAccessibleAgentProfiles(db, user.id).map(toAgentProfilePublic),
     });
   });
 
@@ -49,7 +49,7 @@ export function createAgentProfileRoutes(db: Db) {
 
   app.get('/:id', (c) => {
     const user = c.get('user')!;
-    const row = getOwnedAgentProfile(db, user.id, c.req.param('id'));
+    const row = getAccessibleAgentProfile(db, user.id, c.req.param('id'));
     if (!row) return c.json({ error: 'Agent profile not found' }, 404);
     return c.json({ agent_profile: toAgentProfilePublic(row) });
   });
@@ -61,14 +61,14 @@ export function createAgentProfileRoutes(db: Db) {
     if (!parsed.success) {
       return c.json({ error: formatZodError(parsed.error) }, 400);
     }
-    const result = updateAgentProfile(db, user.id, c.req.param('id'), parsed.data);
+    const result = updateAccessibleAgentProfile(db, user.id, c.req.param('id'), parsed.data);
     if (!result.ok) {
       if (result.reason === 'archived') {
         return c.json({ error: 'Agent profile is archived' }, 409);
       }
       return c.json({ error: 'Agent profile not found' }, 404);
     }
-    const row = getOwnedAgentProfile(db, user.id, c.req.param('id'))!;
+    const row = getAccessibleAgentProfile(db, user.id, c.req.param('id'))!;
     return c.json({ agent_profile: toAgentProfilePublic(row) });
   });
 
@@ -92,7 +92,7 @@ export function createAgentProfileRoutes(db: Db) {
 
   app.get('/:id/prompt-versions', (c) => {
     const user = c.get('user')!;
-    const versions = listPromptVersions(db, user.id, c.req.param('id'));
+    const versions = listAccessiblePromptVersions(db, user.id, c.req.param('id'));
     if (!versions) return c.json({ error: 'Agent profile not found' }, 404);
     return c.json({ versions });
   });
@@ -103,7 +103,7 @@ export function createAgentProfileRoutes(db: Db) {
     if (!Number.isInteger(version) || version < 1) {
       return c.json({ error: 'Invalid version' }, 400);
     }
-    const result = restorePromptVersion(
+    const result = restoreAccessiblePromptVersion(
       db,
       user.id,
       c.req.param('id'),
@@ -118,7 +118,7 @@ export function createAgentProfileRoutes(db: Db) {
       }
       return c.json({ error: 'Agent profile not found' }, 404);
     }
-    const row = getOwnedAgentProfile(db, user.id, c.req.param('id'))!;
+    const row = getAccessibleAgentProfile(db, user.id, c.req.param('id'))!;
     return c.json({ agent_profile: toAgentProfilePublic(row) });
   });
 

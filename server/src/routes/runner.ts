@@ -4,7 +4,8 @@ import { Hono } from 'hono';
 import type Database from 'better-sqlite3';
 import { authMiddleware } from '../middleware/auth.js';
 import { formatZodError, createRunnerMessageSchema } from '../schemas.js';
-import { getOwnedRuntimeSession } from '../runtime-sessions.js';
+import { getAccessibleRuntimeSession } from '../runtime-sessions.js';
+import { canWorkspaceAction } from '../workspace-acl.js';
 import {
   createRunnerSubmission,
   getRunnerTurnById,
@@ -26,7 +27,10 @@ export function createRunnerRoutes(
     const user = c.get('user')!;
     const jid = c.req.param('jid');
     const sessionId = c.req.param('sessionId');
-    const session = getOwnedRuntimeSession(db, user.id, jid, sessionId);
+    if (!canWorkspaceAction(db, user.id, jid, 'converse')) {
+      return c.json({ error: 'Runtime session not found' }, 404);
+    }
+    const session = getAccessibleRuntimeSession(db, user.id, jid, sessionId);
     if (!session || session.status !== 'active') {
       return c.json({ error: 'Runtime session not found' }, 404);
     }
@@ -72,7 +76,10 @@ export function createRunnerRoutes(
     const user = c.get('user')!;
     const jid = c.req.param('jid');
     const sessionId = c.req.param('sessionId');
-    const session = getOwnedRuntimeSession(db, user.id, jid, sessionId);
+    if (!canWorkspaceAction(db, user.id, jid, 'converse')) {
+      return c.json({ error: 'Runtime session not found' }, 404);
+    }
+    const session = getAccessibleRuntimeSession(db, user.id, jid, sessionId);
     if (!session || session.status !== 'active') {
       return c.json({ error: 'Runtime session not found' }, 404);
     }
@@ -105,12 +112,13 @@ export function createRunnerRoutes(
     const user = c.get('user')!;
     const jid = c.req.param('jid');
     const sessionId = c.req.param('sessionId');
-    const session = getOwnedRuntimeSession(db, user.id, jid, sessionId);
+    const session = canWorkspaceAction(db, user.id, jid, 'view')
+      ? getAccessibleRuntimeSession(db, user.id, jid, sessionId)
+      : undefined;
     if (!session) return c.json({ error: 'Runtime session not found' }, 404);
     const turn = getRunnerTurnById(db, c.req.param('turnId'));
     if (
       !turn ||
-      turn.ownerUserId !== user.id ||
       turn.workspaceJid !== jid ||
       turn.sessionId !== sessionId
     ) {
@@ -127,12 +135,13 @@ export function createRunnerRoutes(
         const jid = c.req.param('jid') ?? '';
         const sessionId = c.req.param('sessionId') ?? '';
         const turnId = c.req.param('turnId') ?? '';
-        const session = getOwnedRuntimeSession(db, user.id, jid, sessionId);
+        const session = canWorkspaceAction(db, user.id, jid, 'view')
+          ? getAccessibleRuntimeSession(db, user.id, jid, sessionId)
+          : undefined;
         const turn = getRunnerTurnById(db, turnId);
         const authorized =
           !!session &&
           !!turn &&
-          turn.ownerUserId === user.id &&
           turn.workspaceJid === jid &&
           turn.sessionId === sessionId;
         let unsubscribe: (() => void) | undefined;

@@ -4,9 +4,10 @@ import type Database from 'better-sqlite3';
 import type { AgentRunner, AgentRunRequest } from '@deep-worker/pi-runner';
 import { SessionQueue, type SessionQueueOptions } from '@deep-worker/pi-runner';
 import type { StreamEvent } from '@deep-worker/shared';
-import { getOwnedAgentProfile } from './agent-profiles.js';
-import { getOwnedRuntimeSession } from './runtime-sessions.js';
-import { getOwnedWorkspace, workspaceRoot } from './workspaces.js';
+import { getAgentProfileById } from './agent-profiles.js';
+import { getAccessibleRuntimeSession } from './runtime-sessions.js';
+import { getWorkspaceAccess } from './workspace-acl.js';
+import { getWorkspaceById, workspaceRoot } from './workspaces.js';
 import { getUserById } from './users.js';
 import { effectiveExecutionMode } from './execution-policy.js';
 import { getProviderBalance, getProviderCredentials, listProviderConfigs } from './provider-store.js';
@@ -127,7 +128,7 @@ export class RuntimeRunnerService {
   }
 
   async submit(input: RuntimeRunnerMessageInput): Promise<RuntimeRunnerResult> {
-    const session = getOwnedRuntimeSession(
+    const session = getAccessibleRuntimeSession(
       this.db,
       input.ownerUserId,
       input.workspaceJid,
@@ -197,16 +198,18 @@ export class RuntimeRunnerService {
       let usageAgentId: string | null = null;
       let usageModel: string | undefined;
       try {
-        const session = getOwnedRuntimeSession(
+        const access = getWorkspaceAccess(this.db, inbox.ownerUserId, inbox.workspaceJid);
+        const session = getAccessibleRuntimeSession(
           this.db,
           inbox.ownerUserId,
           inbox.workspaceJid,
           inbox.sessionId,
         );
-        const workspace = getOwnedWorkspace(this.db, inbox.ownerUserId, inbox.workspaceJid);
+        const workspace = getWorkspaceById(this.db, inbox.workspaceJid);
         if (!session || session.status !== 'active' || !workspace)
           throw new Error('Runtime session not found');
-        const owner = getUserById(this.db, inbox.ownerUserId);
+        const principalUserId = access?.credentialPrincipalId ?? workspace.owner_user_id ?? inbox.ownerUserId;
+        const owner = getUserById(this.db, principalUserId);
         if (owner) {
           const billingAccess = checkBillingAccess(this.db, owner.id, owner.role, {
             agentId: session.agent_profile_id,
@@ -215,12 +218,12 @@ export class RuntimeRunnerService {
           if (!billingAccess.allowed) throw new Error(billingAccess.reason ?? '当前账户不可用');
         }
         usageAgentId = session.agent_profile_id;
-        selectedProviderPool = this.getProviderPool(inbox.ownerUserId);
+        selectedProviderPool = this.getProviderPool(principalUserId);
         const selectedProvider = selectedProviderPool?.selectProvider(inbox.sessionId);
         selectedProviderId = selectedProvider?.id;
         usageModel = selectedProvider?.model_id;
         const profile = session.agent_profile_id
-          ? getOwnedAgentProfile(this.db, inbox.ownerUserId, session.agent_profile_id)
+          ? getAgentProfileById(this.db, session.agent_profile_id)
           : undefined;
         const request: AgentRunRequest = {
           ownerUserId: inbox.ownerUserId,
@@ -236,7 +239,7 @@ export class RuntimeRunnerService {
           capabilities: options.capabilities,
           capabilityHash: options.capabilities?.hash,
           provider: selectedProvider
-            ? mapProviderToPiProvider(selectedProvider, getProviderCredentials(this.db, inbox.ownerUserId, selectedProvider.id))
+            ? mapProviderToPiProvider(selectedProvider, getProviderCredentials(this.db, principalUserId, selectedProvider.id))
             : undefined,
         };
         await fs.mkdir(request.cwd!, { recursive: true });
@@ -261,7 +264,7 @@ export class RuntimeRunnerService {
           recordUsageEvent({
             db: this.db,
             eventId: `runner:${turnId}`,
-            userId: inbox.ownerUserId,
+            userId: principalUserId,
             workspaceJid: inbox.workspaceJid,
             agentId: usageAgentId,
             messageId: inbox.id,

@@ -42,7 +42,28 @@ export function getWorkspaceAccess(
     .get(actorUserId, workspaceJid) as
     | { owner_user_id: string | null; role: WorkspaceRole }
     | undefined;
-  if (!row?.owner_user_id) return undefined;
+  if (!row?.owner_user_id) {
+    // Compatibility for workspaces created before membership backfill. New writes
+    // always create an explicit membership row, while legacy owners retain access.
+    const legacyOwner = db
+      .prepare(
+        `SELECT owner_user_id FROM workspaces
+         WHERE jid = ? AND status = 'active' AND owner_user_id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM workspace_members WHERE workspace_jid = ?
+           )`,
+      )
+      .get(workspaceJid, actorUserId, workspaceJid) as { owner_user_id: string } | undefined;
+    if (!legacyOwner) return undefined;
+    return {
+      actorUserId,
+      workspaceJid,
+      workspaceOwnerUserId: legacyOwner.owner_user_id,
+      credentialPrincipalId: legacyOwner.owner_user_id,
+      billingPrincipalId: legacyOwner.owner_user_id,
+      role: 'workspace_admin',
+    };
+  }
   return {
     actorUserId,
     workspaceJid,
