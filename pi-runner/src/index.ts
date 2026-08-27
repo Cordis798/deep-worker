@@ -14,3 +14,4 @@ export * from './tool-registry.js';
 export * from './capability-injection.js';
 export * from './runtime.js';
 export * from './pi-sdk-session.js';
+export * from './pi-session-discovery.js';
