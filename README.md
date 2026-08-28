@@ -37,7 +37,7 @@
 
 Deep Worker 将 Agent 运行所需的四类长期资产放进同一个 Workspace：
 
-- **身份可版本化**：结构化 Prompt 形成稳定的 AgentProfile。
+- **身份可更新**：结构化 Prompt 形成稳定的 AgentProfile。
 - **能力可治理**：岗位、角色、能力包与 Workspace ACL 共同决定工具边界。
 - **知识可沉淀**：跨会话 Memory 保存事实、决策、经验与待办。
 - **协作可编排**：Agent Router 拆解、调度并追踪跨角色任务。
