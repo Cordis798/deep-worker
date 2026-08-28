@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+  <title id="title">Deep Worker 四个核心设计</title>
+  <desc id="desc">Prompt 定义身份，能力治理约束工具，Memory 沉淀知识，Router 编排协作</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="430" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0b1020"/>
+      <stop offset="1" stop-color="#172554"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="m0 0 10 5-10 5Z" fill="#93c5fd"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="430" rx="32" fill="url(#bg)"/>
+  <text x="64" y="66" fill="#fff" font-family="Inter,Segoe UI,sans-serif" font-size="28" font-weight="700">从单 Agent 执行到多 Agent 编排</text>
+  <text x="64" y="98" fill="#a5b4fc" font-family="Inter,Segoe UI,sans-serif" font-size="16">身份、工具、知识与协作进入同一条可审计链路</text>
+  <g font-family="Inter,Segoe UI,sans-serif">
+    <rect x="64" y="148" width="238" height="190" rx="22" fill="#111827" stroke="#818cf8" stroke-width="2"/>
+    <text x="88" y="184" fill="#c7d2fe" font-size="13" font-weight="700">R15</text>
+    <text x="88" y="219" fill="#fff" font-size="20" font-weight="700">Prompt 定义身份</text>
+    <text x="88" y="253" fill="#c7d2fe" font-size="14">四段配置 · 版本恢复</text>
+    <text x="88" y="280" fill="#c7d2fe" font-size="14">Identity Hash · 一致性校验</text>
+
+    <rect x="330" y="148" width="238" height="190" rx="22" fill="#111827" stroke="#38bdf8" stroke-width="2"/>
+    <text x="354" y="184" fill="#bae6fd" font-size="13" font-weight="700">R16</text>
+    <text x="354" y="219" fill="#fff" font-size="20" font-weight="700">能力治理约束工具</text>
+    <text x="354" y="253" fill="#bae6fd" font-size="14">岗位 · 角色 · 能力包</text>
+    <text x="354" y="280" fill="#bae6fd" font-size="14">Skills · MCP · Plugins</text>
+
+    <rect x="596" y="148" width="238" height="190" rx="22" fill="#111827" stroke="#2dd4bf" stroke-width="2"/>
+    <text x="620" y="184" fill="#99f6e4" font-size="13" font-weight="700">R17</text>
+    <text x="620" y="219" fill="#fff" font-size="20" font-weight="700">Memory 沉淀知识</text>
+    <text x="620" y="253" fill="#99f6e4" font-size="14">跨会话持久化 · 修订历史</text>
+    <text x="620" y="280" fill="#99f6e4" font-size="14">乐观锁 · 内容指纹</text>
+
+    <rect x="862" y="148" width="274" height="190" rx="22" fill="url(#accent)"/>
+    <text x="886" y="184" fill="#eef2ff" font-size="13" font-weight="700">R28</text>
+    <text x="886" y="219" fill="#fff" font-size="20" font-weight="700">Router 编排协作</text>
+    <text x="886" y="253" fill="#ecfeff" font-size="14">路由决策 · 子任务调度</text>
+    <text x="886" y="280" fill="#ecfeff" font-size="14">执行追踪 · 结果汇总</text>
+
+    <path d="M302 243h22" stroke="#93c5fd" stroke-width="3" marker-end="url(#arrow)"/>
+    <path d="M568 243h22" stroke="#93c5fd" stroke-width="3" marker-end="url(#arrow)"/>
+    <path d="M834 243h22" stroke="#93c5fd" stroke-width="3" marker-end="url(#arrow)"/>
+  </g>
+  <text x="64" y="388" fill="#94a3b8" font-family="Inter,Segoe UI,sans-serif" font-size="14">Deep Worker · Pi Agent SDK · Workspace ACL · SQLite audit trail</text>
+</svg>
