@@ -46,9 +46,10 @@ Deep Worker 将 Agent 运行所需的四类长期资产放进同一个 Workspace
 
 ## 产品界面
 
-| 初始化 Workspace                                | 多用户登录                                      |
-| ----------------------------------------------- | ----------------------------------------------- |
-| ![Setup screen](./docs/assets/setup-screen.png) | ![Login screen](./docs/assets/login-screen.png) |
+<p align="center">
+  <img src="./docs/assets/setup-screen-cropped.png" width="48%" alt="初始化 Workspace" />
+  <img src="./docs/assets/login-screen-cropped.png" width="48%" alt="多用户登录" />
+</p>
 
 Web 工作台还提供会话、AgentProfile、能力包、Memory、Router 计划与执行事件的统一入口。
 
