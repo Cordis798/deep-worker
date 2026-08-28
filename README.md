@@ -54,7 +54,7 @@ Web 工作台还提供会话、AgentProfile、能力包、Memory、Router 计划
 
 ## 四个核心设计
 
-### R15｜结构化 Prompt 与 Agent 身份
+### 结构化 Prompt 与 Agent 身份
 
 AgentProfile 将配置拆成四个字段：
 
@@ -67,7 +67,7 @@ Profile 支持长度校验、追加或替换、版本记录和 SHA-256 身份指
 
 > 当前运行时主要注入 IDENTITY；完整的四段上下文装配与预算分配仍是后续演进方向。
 
-### R16｜Skills / MCP / Plugins 能力治理
+### Skills / MCP / Plugins 能力治理
 
 能力不再是用户随意勾选的菜单，而是“岗位—角色—能力包”的确定性治理模型。
 
@@ -81,7 +81,7 @@ Profile 支持长度校验、追加或替换、版本记录和 SHA-256 身份指
 
 研发到发布等跨岗位任务由 Router 串联研发与运维 Agent，无需把所有高权限工具集中到一个“万能 Agent”上。
 
-### R17｜跨会话 Workspace Memory
+### 跨会话 Workspace Memory
 
 Memory 将会话结果提升为 Workspace 级资产，支持四类内容：
 
@@ -92,7 +92,7 @@ Memory 将会话结果提升为 Workspace 级资产，支持四类内容：
 
 实现包含创建、更新、查询、软删除、版本历史、内容哈希和 `expectedRevision` 乐观并发控制。当前搜索基于 SQLite `LIKE`，强调可审计的结构化记忆，而不是向量 RAG；Memory 也不会未经选择自动注入所有会话。
 
-### R28｜能力感知的 Agent Router
+### 能力感知的 Agent Router
 
 针对单 Agent 无法覆盖跨岗位复杂任务的问题，Router 形成闭环：
 
