@@ -7,7 +7,7 @@
 ## 用户故事
 
 - 管理员可以把工作区设为 Host 或 Container；普通成员创建的工作区默认使用 Container，不能把工作区降级到 Host。
-- Container Runner 以非 root 身份启动 Pi RPC，使用显式镜像、超时、资源限制和挂载清单；挂载路径不在 allowlist 内时拒绝启动。
+- Container Runner 以非 root 身份启动 Pi Agent SDK Worker，通过中性 JSON IPC 控制；使用显式镜像、超时、资源限制和挂载清单，挂载路径不在 allowlist 内时拒绝启动。
 - 同一 Runtime Session 优先保持 Provider 粘性；Provider 连续失败后从健康候选中按策略选择替代项，恢复间隔到期后自动恢复。
 - Provider 凭据只以加密密文落盘，映射到 Pi 时才生成进程环境，不进入普通日志和监控响应。
 - 管理员可以查看队列、Runner、Container、Provider 和遗留租约状态，并可执行安全的 Runner 恢复操作。
