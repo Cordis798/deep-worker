@@ -16,7 +16,7 @@
   </defs>
   <rect width="1200" height="520" rx="32" fill="url(#background)"/>
   <text x="64" y="68" fill="#fff" font-family="Inter,Segoe UI,sans-serif" font-size="28" font-weight="700">Deep Worker · 可恢复的 Agent 工作台</text>
-  <text x="64" y="98" fill="#a5b4fc" font-family="Inter,Segoe UI,sans-serif" font-size="15">消息进入 → 按 Session 串行 → Pi 执行 → 流式事件 → durable reply</text>
+  <text x="64" y="98" fill="#a5b4fc" font-family="Inter,Segoe UI,sans-serif" font-size="15">消息进入 → ACL/路由编排 → 按 Session 串行 → Pi SDK 执行 → 流式事件 → durable reply</text>
   <g font-family="Inter,Segoe UI,sans-serif">
     <rect x="64" y="166" width="190" height="118" rx="20" fill="#fff"/>
     <text x="88" y="207" fill="#0f172a" font-size="18" font-weight="700">Web / PWA</text>
@@ -32,8 +32,8 @@
     <rect x="620" y="140" width="220" height="170" rx="20" fill="#111827" stroke="#22d3ee" stroke-width="2"/>
     <text x="648" y="183" fill="#fff" font-size="18" font-weight="700">Pi Runner</text>
     <text x="648" y="214" fill="#cffafe" font-size="14">SessionQueue</text>
-    <text x="648" y="238" fill="#cffafe" font-size="14">Pi RPC / Fake Pi</text>
-    <text x="648" y="262" fill="#cffafe" font-size="14">bash · StreamEvent</text>
+    <text x="648" y="238" fill="#cffafe" font-size="14">Pi Agent SDK / Fake Worker</text>
+    <text x="648" y="262" fill="#cffafe" font-size="14">Skills · MCP · StreamEvent</text>
 
     <rect x="914" y="166" width="220" height="118" rx="20" fill="#fff"/>
     <text x="942" y="207" fill="#0f172a" font-size="18" font-weight="700">SQLite</text>
